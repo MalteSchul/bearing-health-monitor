@@ -2,18 +2,24 @@
 # "frontend" stage whose dist/ output is copied into the runtime image.
 
 FROM python:3.12-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:0.12.21 /uv /bin/uv
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
 WORKDIR /app
-COPY pyproject.toml README.md ./
+# Dependencies first, so code changes don't invalidate this layer.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
+COPY README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir --prefix=/install .
+RUN uv sync --locked --no-dev --no-editable
 
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 RUN useradd --create-home --uid 1000 app
-COPY --from=build /install /usr/local
+COPY --from=build /app/.venv /app/.venv
 COPY frontend ./frontend
 COPY data/processed ./data/processed
-ENV MONITOR_FRONTEND_DIR=/app/frontend
+ENV PATH="/app/.venv/bin:$PATH" \
+    MONITOR_FRONTEND_DIR=/app/frontend
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "monitor.api:app", "--host", "0.0.0.0", "--port", "8000"]

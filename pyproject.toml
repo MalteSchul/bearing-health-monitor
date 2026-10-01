@@ -15,11 +15,14 @@ dependencies = [
     "scikit-learn>=1.5",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.3",
-    "httpx>=0.27",
     "ruff>=0.6",
+    "mypy>=1.11",
+    "pandas-stubs>=2.2",
+    "pre-commit>=3.8",
+    "httpx2>=2.13.1",
 ]
 
 [build-system]
@@ -38,3 +41,15 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+plugins = ["pydantic.mypy"]
+# Not full strict: numpy/scipy stubs produce false positives there. Every function must be typed, though.
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_reexport = true
