@@ -26,11 +26,12 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The distribution is named bearing-health-monitor, the import package is monitor.
+[tool.hatch.build.targets.wheel]
+packages = ["src/monitor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
