@@ -5,22 +5,27 @@ vibration features → anomaly detection → health index → REST API → dashb
 
 ## Run locally
 
+Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/)
+(Windows: `winget install astral-sh.uv Casey.Just`).
+
 ```bash
-python -m venv .venv
-source .venv/Scripts/activate   # Windows Git Bash; on Linux/macOS: .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn monitor.api:app --reload
+just setup   # install dependencies and git hooks
+just dev     # run the API with auto-reload
 ```
 
 - Dashboard: http://localhost:8000
 - API docs: http://localhost:8000/docs
 
-## Tests
+## Checks
 
 ```bash
-pytest
-ruff check . && ruff format --check .
+just lint    # ruff lint + format check, mypy
+just test    # pytest
+just check   # both, same as CI
+just fmt     # apply lint fixes and formatting
 ```
+
+Run `just` to list all recipes.
 
 ## Architecture
 
