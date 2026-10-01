@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Raw dataset is downloaded by scripts/ingest_ims.py and never committed
+data/raw/
+
+# Frontend build output (if a React/Vite frontend is added later)
+frontend/node_modules/
+frontend/dist/
+
+.env
+.mypy_cache/

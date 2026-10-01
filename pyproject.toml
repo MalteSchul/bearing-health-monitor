@@ -1,0 +1,55 @@
+[project]
+name = "bearing-health-monitor"
+version = "0.1.0"
+description = "Condition monitoring for rolling bearings: vibration features, anomaly detection and a REST API."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "scikit-learn>=1.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pandas-stubs>=2.2",
+    "pre-commit>=3.8",
+    "httpx2>=2.13.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+plugins = ["pydantic.mypy"]
+# Not full strict: numpy/scipy stubs produce false positives there. Every function must be typed, though.
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_reexport = true
