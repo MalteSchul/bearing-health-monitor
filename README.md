@@ -29,7 +29,7 @@ Run `just` to list all recipes.
 
 ## Architecture
 
-- `src/monitor/`: Python package (API under `/api/v1`)
+- `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
 - `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.

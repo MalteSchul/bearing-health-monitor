@@ -31,7 +31,12 @@ jobs:
       PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+      - run: >
+          docker build
+          --build-arg COMMIT_SHA=${{ github.sha }}
+          -t "$IMAGE:${{ github.sha }}"
+          -t "$IMAGE:latest"
+          .
       # Only main may push: the federated credential in Azure trusts refs/heads/main only.
       - if: env.PUBLISH == 'true'
         uses: azure/login@v3.1.0
@@ -49,3 +54,17 @@ jobs:
           --name bearing-health-monitor
           --resource-group rg-bearing-health-monitor
           --image "$IMAGE:${{ github.sha }}"
+      # Fail the run unless the live app reports this commit, i.e. the new revision took over.
+      - if: env.PUBLISH == 'true'
+        run: |
+          fqdn=$(az containerapp show \
+            --name bearing-health-monitor \
+            --resource-group rg-bearing-health-monitor \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for attempt in $(seq 1 12); do
+            commit=$(curl -fsS "https://$fqdn/api/version" | jq -r .commit) || true
+            if [ "$commit" = "$GITHUB_SHA" ]; then exit 0; fi
+            echo "Attempt $attempt: live app reports '${commit}', waiting for $GITHUB_SHA"
+            sleep 10
+          done
+          exit 1
