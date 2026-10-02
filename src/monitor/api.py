@@ -4,12 +4,13 @@ from fastapi.staticfiles import StaticFiles
 
 from monitor.config import Settings
 
-API_PREFIX = "/api/v1"
+API_PREFIX = "/api"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="Bearing Health Monitor", version="0.1.0")
+    # The commit is the version: every merge to main is deployed, nobody cuts releases.
+    app = FastAPI(title="Bearing Health Monitor", version=settings.commit_sha)
 
     if settings.cors_origins:
         app.add_middleware(
@@ -19,13 +20,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
 
-    router = APIRouter(prefix=API_PREFIX)
+    # Unversioned: these describe the deployment, not the API contract.
+    # Business endpoints go under /api/v1 so they can move to /api/v2 on their own.
+    system = APIRouter(prefix=API_PREFIX, tags=["system"])
 
-    @router.get("/health", tags=["system"])
+    @system.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    app.include_router(router)
+    @system.get("/version")
+    def version() -> dict[str, str]:
+        return {"commit": settings.commit_sha}
+
+    app.include_router(system)
 
     # Mounted last so it never shadows API routes.
     if settings.frontend_dir.is_dir():

@@ -14,3 +14,5 @@ class Settings(BaseSettings):
     frontend_dir: Path = PROJECT_ROOT / "frontend"
     # Origins allowed to call the API directly, e.g. a Vite dev server on http://localhost:5173.
     cors_origins: list[str] = []
+    # Git commit the running build was made from. CI bakes it into the image; "dev" otherwise.
+    commit_sha: str = "dev"
