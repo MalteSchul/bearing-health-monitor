@@ -43,3 +43,9 @@ jobs:
         run: az acr login --name "$REGISTRY"
       - if: env.PUBLISH == 'true'
         run: docker push --all-tags "$IMAGE"
+      - if: env.PUBLISH == 'true'
+        run: >
+          az containerapp update
+          --name bearing-health-monitor
+          --resource-group rg-bearing-health-monitor
+          --image "$IMAGE:${{ github.sha }}"
