@@ -62,7 +62,7 @@ jobs:
             --resource-group rg-bearing-health-monitor \
             --query properties.configuration.ingress.fqdn -o tsv)
           for attempt in $(seq 1 12); do
-            commit=$(curl -fsS "https://$fqdn/api/version" | jq -r .commit) || true
+            commit=$(curl -fsS --max-time 10 "https://$fqdn/api/version" | jq -r .commit) || true
             if [ "$commit" = "$GITHUB_SHA" ]; then exit 0; fi
             echo "Attempt $attempt: live app reports '${commit}', waiting for $GITHUB_SHA"
             sleep 10
