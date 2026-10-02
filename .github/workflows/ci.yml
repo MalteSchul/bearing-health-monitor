@@ -13,11 +13,16 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
-      - run: uv sync --locked
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run mypy
-      - run: uv run pytest
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Type-check
+        run: uv run mypy
+      - name: Test
+        run: uv run pytest
 
   docker:
     needs: test
@@ -31,31 +36,37 @@ jobs:
       PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v7
-      - run: >
+      - name: Build image
+        run: >
           docker build
           --build-arg COMMIT_SHA=${{ github.sha }}
           -t "$IMAGE:${{ github.sha }}"
           -t "$IMAGE:latest"
           .
       # Only main may push: the federated credential in Azure trusts refs/heads/main only.
-      - if: env.PUBLISH == 'true'
+      - name: Log in to Azure
+        if: env.PUBLISH == 'true'
         uses: azure/login@v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - if: env.PUBLISH == 'true'
+      - name: Log in to the registry
+        if: env.PUBLISH == 'true'
         run: az acr login --name "$REGISTRY"
-      - if: env.PUBLISH == 'true'
+      - name: Push image
+        if: env.PUBLISH == 'true'
         run: docker push --all-tags "$IMAGE"
-      - if: env.PUBLISH == 'true'
+      - name: Deploy to Container Apps
+        if: env.PUBLISH == 'true'
         run: >
           az containerapp update
           --name bearing-health-monitor
           --resource-group rg-bearing-health-monitor
           --image "$IMAGE:${{ github.sha }}"
       # Fail the run unless the live app reports this commit, i.e. the new revision took over.
-      - if: env.PUBLISH == 'true'
+      - name: Check live version
+        if: env.PUBLISH == 'true'
         run: |
           fqdn=$(az containerapp show \
             --name bearing-health-monitor \
@@ -63,7 +74,10 @@ jobs:
             --query properties.configuration.ingress.fqdn -o tsv)
           for attempt in $(seq 1 12); do
             commit=$(curl -fsS --max-time 10 "https://$fqdn/api/version" | jq -r .commit) || true
-            if [ "$commit" = "$GITHUB_SHA" ]; then exit 0; fi
+            if [ "$commit" = "$GITHUB_SHA" ]; then
+              echo "Attempt $attempt: live app reports $commit, deploy confirmed"
+              exit 0
+            fi
             echo "Attempt $attempt: live app reports '${commit}', waiting for $GITHUB_SHA"
             sleep 10
           done
