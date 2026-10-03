@@ -1,7 +1,47 @@
+from dataclasses import fields
+from datetime import datetime, timedelta
+
+import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from monitor.api import create_app
 from monitor.config import Settings
+from monitor.features import ChannelFeatures
+from monitor.store import FEATURES, ChannelSeries
+
+SNAPSHOTS = 40
+START = datetime(2004, 2, 12, 10, 0)
+
+
+def feature_rows(experiment: str, bearing: int, channel: int) -> list[dict[str, object]]:
+    return [
+        {
+            "experiment": experiment,
+            "timestamp": START + timedelta(minutes=10 * i),
+            "bearing": bearing,
+            "channel": channel,
+            # Distinct per feature, channel and snapshot, so a mix-up shows.
+            **{name: channel + k / 10 + i / 1000 for k, name in enumerate(FEATURES)},
+        }
+        for i in range(SNAPSHOTS)
+    ]
+
+
+@pytest.fixture(autouse=True)
+def synthetic_features(tmp_path, monkeypatch):
+    """A small feature table in the shape scripts/extract_features.py writes."""
+    rows = [
+        *feature_rows("set1", bearing=3, channel=6),  # shuffled on purpose
+        *feature_rows("set1", bearing=3, channel=5),
+        *feature_rows("set2", bearing=1, channel=1),
+        *feature_rows("set2", bearing=2, channel=2),
+    ]
+    frame = pd.DataFrame(rows).sample(frac=1, random_state=0)
+    frame[list(FEATURES)] = frame[list(FEATURES)].astype("float32")
+    path = tmp_path / "features.parquet"
+    frame.to_parquet(path, index=False)
+    monkeypatch.setenv("MONITOR_FEATURES_PATH", str(path))
 
 
 def make_client(**overrides) -> TestClient:
@@ -63,3 +103,85 @@ def test_version_reports_the_build_commit(tmp_path):
 
     assert client.get("/api/version").json() == {"commit": "3ef6878"}
     assert client.get("/openapi.json").json()["info"]["version"] == "3ef6878"
+
+
+def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    experiments = {e["name"]: e for e in client.get("/api/v1/experiments").json()}
+
+    assert set(experiments) == {"set1", "set2"}
+    set2 = experiments["set2"]
+    assert set2["snapshots"] == SNAPSHOTS
+    assert set2["first"] == START.isoformat()
+    assert set2["bearings"] == [
+        {"bearing": 1, "channels": [1], "failure": "outer race"},
+        {"bearing": 2, "channels": [2], "failure": None},
+    ]
+    assert experiments["set1"]["bearings"][0]["channels"] == [5, 6]
+
+
+def test_bearings_of_an_experiment(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    response = client.get("/api/v1/experiments/set1/bearings")
+
+    assert response.json() == [{"bearing": 3, "channels": [5, 6], "failure": "inner race"}]
+
+
+def test_bearing_features_are_columnar_and_in_time_order(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set2/bearings/1/features").json()
+
+    assert (body["experiment"], body["bearing"], body["failure"]) == ("set2", 1, "outer race")
+    [channel] = body["channels"]
+    assert channel["channel"] == 1
+    assert channel["timestamps"] == sorted(channel["timestamps"])
+    assert len(channel["timestamps"]) == SNAPSHOTS
+    assert channel["rms"][:2] == [1.0, 1.001]
+    assert channel["kurtosis"][-1] == pytest.approx(1.3 + (SNAPSHOTS - 1) / 1000)
+
+
+def test_bearing_with_two_sensors_returns_both_channels(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set1/bearings/3/features").json()
+
+    assert [c["channel"] for c in body["channels"]] == [5, 6]
+    assert body["channels"][1]["rms"][0] == 6.0
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/experiments/set9/bearings",
+        "/api/v1/experiments/set9/bearings/1/features",
+        "/api/v1/experiments/set2/bearings/3/features",
+    ],
+)
+def test_unknown_experiment_or_bearing_is_404(tmp_path, path):
+    client = make_client(frontend_dir=tmp_path)
+
+    assert client.get(path).status_code == 404
+
+
+def test_feature_series_are_gzipped_when_the_client_accepts_it(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    response = client.get(
+        "/api/v1/experiments/set1/bearings/3/features", headers={"Accept-Encoding": "gzip"}
+    )
+
+    assert response.headers["content-encoding"] == "gzip"
+
+
+def test_app_does_not_start_without_the_feature_table(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        create_app(Settings(frontend_dir=tmp_path, features_path=tmp_path / "missing.parquet"))
+
+
+def test_response_model_has_a_series_for_every_feature():
+    assert set(ChannelSeries.model_fields) == {"channel", "timestamps"} | {
+        f.name for f in fields(ChannelFeatures)
+    }

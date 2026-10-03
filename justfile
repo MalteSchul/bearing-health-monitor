@@ -11,7 +11,7 @@ setup:
 
 # Run the API with auto-reload (dashboard: http://localhost:8000, docs: /docs)
 dev:
-    uv run uvicorn monitor.api:app --reload
+    uv run uvicorn monitor.api:create_app --factory --reload
 
 # Run the test suite; extra arguments go to pytest
 test *args:

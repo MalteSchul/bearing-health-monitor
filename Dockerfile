@@ -19,10 +19,11 @@ COPY --from=build /app/.venv /app/.venv
 COPY frontend ./frontend
 COPY data/processed ./data/processed
 ENV PATH="/app/.venv/bin:$PATH" \
-    MONITOR_FRONTEND_DIR=/app/frontend
+    MONITOR_FRONTEND_DIR=/app/frontend \
+    MONITOR_FEATURES_PATH=/app/data/processed/features.parquet
 # Last, because it changes on every build and invalidates every layer after it.
 ARG COMMIT_SHA=dev
 ENV MONITOR_COMMIT_SHA=$COMMIT_SHA
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "monitor.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "monitor.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

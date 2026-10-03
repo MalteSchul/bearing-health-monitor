@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     # Directory served at "/". Plain HTML today; point it at frontend/dist for a Vite build.
     frontend_dir: Path = PROJECT_ROOT / "frontend"
+    # Feature table from scripts/extract_features.py, loaded once at startup.
+    features_path: Path = PROJECT_ROOT / "data" / "processed" / "features.parquet"
     # Origins allowed to call the API directly, e.g. a Vite dev server on http://localhost:5173.
     cors_origins: list[str] = []
     # Git commit the running build was made from. CI bakes it into the image; "dev" otherwise.
