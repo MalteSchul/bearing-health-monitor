@@ -1,11 +1,17 @@
-"""Health of each bearing in a run, judged against that run's own healthy start.
+"""Condition of each bearing in a run, judged against that run's own healthy start.
 
-A run is the feature rows of one experiment: timestamp, bearing, channel and FEATURES.
+A run is the feature rows of one experiment: timestamp, bearing, channel and FEATURES. Each
+snapshot is judged only from the snapshots up to it, so a replay shows what an operator would
+have seen at the time.
 """
 
+from bisect import bisect_right
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
+import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from monitor.features import FEATURES
@@ -19,7 +25,7 @@ HOLD = pd.Timedelta(hours=1)
 # Longer without data restarts the hold: a gap is no evidence that the index stayed high.
 MAX_GAP = pd.Timedelta(minutes=30)
 # All bearings share one shaft and housing, so a fault reaches the other sensors too, weaker.
-# In set 2 the failing bearing showed its fault 7 x stronger than the loudest neighbour.
+# In set 2 the failing bearing showed its fault a median 7 x stronger than the loudest neighbour.
 CROSSTALK_FACTOR = 3.0
 
 # The part whose impact rate each envelope feature measures. Time-domain features rise for any
@@ -30,15 +36,54 @@ PARTS = {
     "env_bsf": "roller element",
     "env_ftf": "cage",
 }
+ENVELOPE = [FEATURES.index(name) for name in PARTS]
+
+Status = Literal["baseline", "ok", "crosstalk", "alarm"]
+
+
+@dataclass(frozen=True)
+class Condition:
+    """What the monitor says about one bearing, judged from the snapshots up to `as_of`."""
+
+    as_of: datetime
+    status: Status
+    # The largest feature ratio and the feature it comes from; None during the baseline.
+    index: float | None = None
+    driver: str | None = None
+    # Only for alarm and crosstalk: the part whose fault frequency stood out over the last hour.
+    diagnosis: str | None = None
+    alarm_at: datetime | None = None
+    # For crosstalk: the bearing whose fault this one picks up.
+    crosstalk_from: int | None = None
+
+
+@dataclass(frozen=True)
+class History:
+    """One bearing's condition at every snapshot of its run, in time order."""
+
+    bearing: int
+    conditions: tuple[Condition, ...]
+
+    def at(self, time: datetime | None = None) -> Condition | None:
+        """The condition as of `time`, the latest without one; None before the first snapshot."""
+        if time is None:
+            return self.conditions[-1]
+        i = bisect_right(self.conditions, time, key=lambda c: c.as_of)
+        return self.conditions[i - 1] if i else None
 
 
 def bearing_ratios(run: pd.DataFrame) -> pd.DataFrame:
-    """Each feature as a multiple of its baseline median, indexed by (bearing, timestamp)."""
+    """Each feature as a multiple of its baseline median, indexed by (bearing, timestamp).
+
+    NaN during the baseline itself: until it is complete there is nothing to compare against.
+    """
     features = list(FEATURES)
-    healthy = run[run["timestamp"] < run["timestamp"].min() + BASELINE]
+    judged = run["timestamp"] >= run["timestamp"].min() + BASELINE
     # Median, not mean: one spike in the baseline must not shift it.
-    baseline = healthy.groupby("channel")[features].median()
-    ratios = run[features] / baseline.loc[run["channel"]].to_numpy()
+    baseline = run[~judged].groupby("channel")[features].median()
+    # In float64: the table stores float32, whose rounding would show as 3.9119999 in the API.
+    ratios = run[features].astype(np.float64) / baseline.loc[run["channel"]].to_numpy()
+    ratios.loc[~judged] = np.nan
     ratios[["bearing", "timestamp"]] = run[["bearing", "timestamp"]]
     # A defect shows most clearly on the sensor nearest to it, so a bearing is as bad as its
     # worse channel.
@@ -48,75 +93,98 @@ def bearing_ratios(run: pd.DataFrame) -> pd.DataFrame:
 
 def health_index(ratios: pd.DataFrame) -> pd.DataFrame:
     """The largest ratio per bearing and snapshot, and the feature it comes from."""
-    # Max, not mean: a fault raises one feature first, and the other seven would dilute it.
-    return pd.DataFrame({"health_index": ratios.max(axis=1), "feature": ratios.idxmax(axis=1)})
+    judged = ratios.notna().any(axis=1)
+    return pd.DataFrame(
+        {
+            # Max, not mean: a fault raises one feature first, and the other seven would dilute
+            # it. Three decimals, so decisions use exactly the value that is reported.
+            "health_index": ratios.max(axis=1).round(3),
+            # idxmax refuses rows without values; those are the baseline, which has no index.
+            "feature": ratios.fillna(-np.inf).idxmax(axis=1).where(judged),
+        }
+    )
 
 
-def alarm_time(index: pd.Series) -> pd.Timestamp | None:
-    """When one bearing's index, indexed by timestamp, has first held THRESHOLD for HOLD.
-
-    The alarm latches: a damaged bearing does not heal, so later dips do not clear it.
-    """
-    start: pd.Timestamp | None = None
+def held(index: pd.Series) -> pd.Series:
+    """For each snapshot, whether one bearing's index has stayed at THRESHOLD or above for HOLD."""
+    since: pd.Timestamp | None = None
     previous: pd.Timestamp | None = None
-    index = index.sort_index()
+    holding = []
     for timestamp, value in zip(pd.DatetimeIndex(index.index), index, strict=True):
-        if value < THRESHOLD:
-            start = None
-        elif start is None or previous is None or timestamp - previous > MAX_GAP:
-            start = timestamp
-        if start is not None and timestamp - start >= HOLD:
-            return timestamp
+        if not value >= THRESHOLD:  # NaN during the baseline, too
+            since = None
+        elif since is None or previous is None or timestamp - previous > MAX_GAP:
+            since = timestamp
+        holding.append(since is not None and timestamp - since >= HOLD)
         previous = timestamp
-    return None
+    return pd.Series(holding, index=index.index)
 
 
-@dataclass(frozen=True)
-class Assessment:
-    bearing: int
-    status: Literal["ok", "alarm", "crosstalk"]
-    alarm_time: pd.Timestamp | None = None
-    # The feature that drove the index most often in the hour before the alarm.
-    feature: str | None = None
-    part: str | None = None
-    # For crosstalk: the bearing whose fault this one picks up.
-    source: int | None = None
+def loudest_neighbour(recent: npt.NDArray[np.float64], bearing: int) -> tuple[int, float]:
+    """Position of the other bearing that showed this one's strongest feature loudest, and how
+    many times louder. `recent` holds each bearing's median ratio per feature over the last hour.
+    """
+    feature = int(recent[bearing].argmax())
+    loudness = recent[:, feature].copy()
+    own = loudness[bearing]
+    loudness[bearing] = -np.inf
+    loudest = int(loudness.argmax())
+    return loudest, float(loudness[loudest] / own)
 
 
-def _hold_window(frame: pd.DataFrame, at: pd.Timestamp) -> pd.DataFrame:
-    """Rows of a timestamp-indexed frame in the hour that raised an alarm at `at`."""
-    return frame[(frame.index > at - HOLD) & (frame.index <= at)]
+def diagnose(recent: npt.NDArray[np.float64]) -> str | None:
+    """The part whose envelope feature stood out most in one bearing's medians, if any did."""
+    strongest = max(ENVELOPE, key=lambda k: recent[k])
+    return PARTS[FEATURES[strongest]] if recent[strongest] >= THRESHOLD else None
 
 
-def crosstalk_source(
-    ratios: pd.DataFrame, bearing: int, feature: str, at: pd.Timestamp
-) -> int | None:
-    """Another bearing that showed `feature` CROSSTALK_FACTOR x stronger in the alarm's hour."""
-    by_bearing = _hold_window(ratios[feature].unstack("bearing"), at).median()
-    stronger = by_bearing.drop(bearing)
-    stronger = stronger[stronger >= CROSSTALK_FACTOR * by_bearing[bearing]]
-    return int(stronger.idxmax()) if len(stronger) else None
-
-
-def assess(run: pd.DataFrame) -> list[Assessment]:
+def assess(run: pd.DataFrame) -> list[History]:
+    """Every bearing's condition at every snapshot of one run."""
     ratios = bearing_ratios(run)
     index = health_index(ratios)
-    assessments = []
-    for bearing in index.index.unique("bearing").tolist():
-        at = alarm_time(index.loc[bearing, "health_index"])
-        if at is None:
-            assessments.append(Assessment(bearing=bearing, status="ok"))
-            continue
-        feature = str(_hold_window(index.loc[bearing], at)["feature"].mode()[0])
-        source = crosstalk_source(ratios, bearing, feature, at)
-        assessments.append(
-            Assessment(
-                bearing=bearing,
-                status="alarm" if source is None else "crosstalk",
-                alarm_time=at,
-                feature=feature,
-                part=PARTS.get(feature),
-                source=source,
+    bearings = ratios.index.unique("bearing").tolist()
+    times = ratios.index.unique("timestamp")
+    if len(ratios) != len(bearings) * len(times):
+        raise ValueError("every snapshot needs features for every bearing")
+    # Medians over the last hour, so a single noisy snapshot cannot decide crosstalk or the part.
+    recent = np.stack([ratios.loc[b].rolling(HOLD).median().to_numpy() for b in bearings], axis=1)
+
+    histories = []
+    for position, bearing in enumerate(bearings):
+        own = index.loc[bearing]
+        values = own["health_index"]
+        explained = [
+            value >= THRESHOLD and loudest_neighbour(recent[i], position)[1] >= CROSSTALK_FACTOR
+            for i, value in enumerate(values)
+        ]
+        elevated = held(values).tolist()
+        # An alarm needs an hour of the bearing's own evidence: snapshots that a louder neighbour
+        # explains do not count. One noisy hour must not latch an alarm for good.
+        alarming = held(values.mask(explained)).tolist()
+
+        alarm_at: datetime | None = None
+        conditions = []
+        for i, (time, value, driver) in enumerate(
+            zip(own.index.to_pydatetime(), values, own["feature"], strict=True)
+        ):
+            if np.isnan(value):
+                conditions.append(Condition(as_of=time, status="baseline"))
+                continue
+            if alarm_at is None and alarming[i]:
+                alarm_at = time
+            crosstalk = alarm_at is None and elevated[i]
+            status: Status = "alarm" if alarm_at is not None else "crosstalk" if crosstalk else "ok"
+            source = loudest_neighbour(recent[i], position)[0] if crosstalk else None
+            conditions.append(
+                Condition(
+                    as_of=time,
+                    status=status,
+                    index=float(value),
+                    driver=str(driver),
+                    diagnosis=None if status == "ok" else diagnose(recent[i, position]),
+                    alarm_at=alarm_at,
+                    crosstalk_from=None if source is None else int(bearings[source]),
+                )
             )
-        )
-    return assessments
+        histories.append(History(bearing=int(bearing), conditions=tuple(conditions)))
+    return histories
