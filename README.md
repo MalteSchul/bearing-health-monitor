@@ -31,7 +31,8 @@ Run `just` to list all recipes.
 
 - `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing and its condition; every
-  shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too
+  shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too.
+  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
   per snapshot

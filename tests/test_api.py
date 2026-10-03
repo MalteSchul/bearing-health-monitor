@@ -172,6 +172,61 @@ def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
     assert [t for t, _, _, status in series if status == "alarm"][0] == ALARM_AT.isoformat()
 
 
+def condition_at(client: TestClient, path: str, at: datetime) -> dict[str, object]:
+    response = client.get(path, params={"at": at.isoformat()})
+    assert response.status_code == 200, response.text
+    condition: dict[str, object] = response.json()["condition"]
+    return condition
+
+
+def test_condition_as_of_a_time_shows_what_was_known_then(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+    path = "/api/v1/experiments/set2/bearings/1"
+
+    learning = condition_at(client, path, START + timedelta(hours=12))
+    rising = condition_at(client, path, FAULT_FROM + timedelta(minutes=30))
+    raised = condition_at(client, path, ALARM_AT + timedelta(minutes=5))
+
+    assert (learning["status"], learning["index"]) == ("baseline", None)
+    assert (rising["status"], rising["alarm_at"]) == ("ok", None)
+    # Between snapshots the answer comes from the latest one before.
+    assert (raised["status"], raised["as_of"]) == ("alarm", ALARM_AT.isoformat())
+
+
+def test_at_applies_to_the_experiment_and_its_bearings_list(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+    at = {"at": (FAULT_FROM + timedelta(minutes=30)).isoformat()}
+
+    experiment = client.get("/api/v1/experiments/set2", params=at).json()
+    listed = client.get("/api/v1/experiments/set2/bearings", params=at).json()
+    single = client.get("/api/v1/experiments/set2/bearings/1", params=at).json()
+
+    assert experiment["bearings"] == listed
+    assert listed[0] == single
+    assert single["condition"]["status"] == "ok"
+
+
+def test_condition_before_the_first_snapshot_is_404(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    response = client.get(
+        "/api/v1/experiments/set2/bearings/1", params={"at": "2004-01-01T00:00:00"}
+    )
+
+    assert response.status_code == 404
+    assert START.isoformat() in response.json()["detail"]
+
+
+def test_at_with_a_utc_offset_is_rejected(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    response = client.get(
+        "/api/v1/experiments/set2/bearings/1", params={"at": "2004-02-13T12:00:00Z"}
+    )
+
+    assert response.status_code == 422
+
+
 def test_single_experiment_matches_its_entry_in_the_list(tmp_path):
     client = make_client(frontend_dir=tmp_path)
 

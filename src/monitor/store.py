@@ -67,6 +67,10 @@ class HealthIndex(BaseModel):
     status: list[Status]
 
 
+class NoDataYet(LookupError):
+    """A condition was asked for before the first snapshot of its run."""
+
+
 @dataclass(frozen=True)
 class _Bearing:
     channels: list[int]
@@ -109,22 +113,23 @@ def _health_index(experiment: str, history: History) -> HealthIndex:
     )
 
 
-def _bearing_summary(bearing: int, data: _Bearing) -> BearingSummary:
+def _bearing_summary(bearing: int, data: _Bearing, at: datetime | None) -> BearingSummary:
+    condition = data.history.at(at)
+    if condition is None:
+        first = data.history.conditions[0].as_of
+        raise NoDataYet(f"No condition before the first snapshot at {first.isoformat()}")
     return BearingSummary(
-        bearing=bearing,
-        channels=data.channels,
-        failure=data.failure,
-        condition=data.history.conditions[-1],
+        bearing=bearing, channels=data.channels, failure=data.failure, condition=condition
     )
 
 
-def _experiment_summary(name: str, run: _Run) -> ExperimentSummary:
+def _experiment_summary(name: str, run: _Run, at: datetime | None = None) -> ExperimentSummary:
     return ExperimentSummary(
         name=name,
         first=run.first,
         last=run.last,
         snapshots=run.snapshots,
-        bearings=[_bearing_summary(bearing, data) for bearing, data in run.bearings.items()],
+        bearings=[_bearing_summary(bearing, data, at) for bearing, data in run.bearings.items()],
     )
 
 
@@ -171,14 +176,17 @@ class FeatureStore:
     def experiments(self) -> list[ExperimentSummary]:
         return [_experiment_summary(name, run) for name, run in self._runs.items()]
 
-    def experiment(self, name: str) -> ExperimentSummary | None:
+    def experiment(self, name: str, at: datetime | None = None) -> ExperimentSummary | None:
+        """The experiment with each bearing's condition as of `at`, the latest without one."""
         run = self._runs.get(name)
-        return None if run is None else _experiment_summary(name, run)
+        return None if run is None else _experiment_summary(name, run, at)
 
-    def bearing(self, experiment: str, bearing: int) -> BearingSummary | None:
+    def bearing(
+        self, experiment: str, bearing: int, at: datetime | None = None
+    ) -> BearingSummary | None:
         run = self._runs.get(experiment)
         data = None if run is None else run.bearings.get(bearing)
-        return None if data is None else _bearing_summary(bearing, data)
+        return None if data is None else _bearing_summary(bearing, data, at)
 
     def features(self, experiment: str, bearing: int) -> BearingFeatures | None:
         return self._features.get((experiment, bearing))
