@@ -1,6 +1,5 @@
 """The feature table the API serves, loaded once at startup and shaped into responses."""
 
-from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 
@@ -8,10 +7,9 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
-from monitor.features import ChannelFeatures
+from monitor.features import FEATURES
 from monitor.ims import EXPERIMENTS
 
-FEATURES = tuple(f.name for f in fields(ChannelFeatures))
 FAILURES = {e.name: e.failures for e in EXPERIMENTS}
 
 

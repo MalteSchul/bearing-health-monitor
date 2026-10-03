@@ -4,7 +4,7 @@ Time-domain statistics say how strongly and how impulsively a bearing vibrates. 
 amplitudes at the fault frequencies say which part the impacts come from.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 import numpy.typing as npt
@@ -37,6 +37,9 @@ class ChannelFeatures:
     env_bsf: float
     env_bpfo: float
     env_bpfi: float
+
+
+FEATURES = tuple(f.name for f in fields(ChannelFeatures))
 
 
 def envelope_spectrum(x: Signal, sample_rate: float) -> tuple[Signal, Signal]:

@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 from monitor.api import create_app
 from monitor.config import Settings
-from monitor.features import ChannelFeatures
-from monitor.store import FEATURES, ChannelSeries
+from monitor.features import FEATURES, ChannelFeatures
+from monitor.store import ChannelSeries
 
 SNAPSHOTS = 40
 START = datetime(2004, 2, 12, 10, 0)
