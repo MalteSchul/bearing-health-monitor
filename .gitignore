@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
-build/
+.mypy_cache/
 dist/
 
 # Raw dataset is downloaded by scripts/ingest_ims.py and never committed
@@ -14,4 +14,3 @@ frontend/node_modules/
 frontend/dist/
 
 .env
-.mypy_cache/
