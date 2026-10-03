@@ -1,11 +1,14 @@
 from datetime import datetime
 
 import numpy as np
+import pytest
 
 from monitor.ims import (
+    FAULT_FREQUENCIES,
     SAMPLES_PER_SNAPSHOT,
     Experiment,
     SnapshotSummary,
+    fault_frequencies,
     summarize_snapshot,
     validate_experiment,
 )
@@ -98,3 +101,22 @@ def test_summarize_flags_non_finite_and_unparseable_snapshots(tmp_path):
 
     assert not summarize_snapshot(nan_file).finite
     assert summarize_snapshot(text_file).error is not None
+
+
+def test_fault_frequencies_match_published_values_for_the_rig():
+    f = FAULT_FREQUENCIES
+
+    assert f.ftf == pytest.approx(14.8, abs=0.1)
+    assert f.bpfo == pytest.approx(236.4, abs=0.1)
+    assert f.bpfi == pytest.approx(296.9, abs=0.1)
+    assert f.bsf == pytest.approx(139.9, abs=0.1)
+
+
+def test_outer_and_inner_race_rates_add_up_to_rollers_times_shaft_speed():
+    f = fault_frequencies(
+        shaft_hz=10, rollers=8, roller_diameter=1, pitch_diameter=5, contact_angle_deg=0
+    )
+
+    # Relative to the cage, outer and inner race together turn once per shaft revolution.
+    assert f.bpfo + f.bpfi == pytest.approx(8 * 10)
+    assert f.bpfo == pytest.approx(8 * f.ftf)
