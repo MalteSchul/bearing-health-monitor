@@ -28,6 +28,10 @@ fmt:
     uv run ruff check --fix .
     uv run ruff format .
 
+# Download the IMS dataset into data/raw/ims (~1 GB, 6 GB unpacked) and check it
+data *args:
+    uv run python scripts/ingest_ims.py {{args}}
+
 # Everything CI checks
 check: lint test
 

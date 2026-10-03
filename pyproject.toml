@@ -45,7 +45,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src"]
+files = ["src", "scripts"]
 plugins = ["pydantic.mypy"]
 # Not full strict: numpy/scipy stubs produce false positives there. Every function must be typed, though.
 disallow_untyped_defs = true

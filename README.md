@@ -37,5 +37,12 @@ Run `just` to list all recipes.
 
 ## Data
 
-NASA IMS Bearing Dataset (J. Lee, H. Qiu, G. Yu, J. Lin, and Rexnord Technical Services,
-"Bearing Data Set", NASA Prognostics Data Repository).
+[NASA IMS Bearing Dataset](https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/)
+(J. Lee, H. Qiu, G. Yu, J. Lin, and Rexnord Technical Services, "Bearing Data Set",
+NASA Prognostics Data Repository).
+
+```bash
+just data    # download (~1 GB) into data/raw/ims and validate it
+```
+
+Unpacking needs bsdtar (built into Windows and macOS; `apt install libarchive-tools` on Linux).
