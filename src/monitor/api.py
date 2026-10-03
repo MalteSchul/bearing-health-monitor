@@ -4,7 +4,13 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from monitor.config import Settings
-from monitor.store import BearingFeatures, BearingSummary, ExperimentSummary, FeatureStore
+from monitor.store import (
+    BearingFeatures,
+    BearingSummary,
+    ExperimentSummary,
+    FeatureStore,
+    HealthIndex,
+)
 
 API_PREFIX = "/api"
 
@@ -57,19 +63,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def bearings(experiment: str) -> list[BearingSummary]:
         return experiment_summary(experiment).bearings
 
+    def no_bearing(experiment: str, bearing: int) -> HTTPException:
+        return HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
+
     @v1.get("/experiments/{experiment}/bearings/{bearing}")
     def bearing_summary(experiment: str, bearing: int) -> BearingSummary:
         summary = store.bearing(experiment, bearing)
         if summary is None:
-            raise HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
+            raise no_bearing(experiment, bearing)
         return summary
 
     @v1.get("/experiments/{experiment}/bearings/{bearing}/features")
     def bearing_features(experiment: str, bearing: int) -> BearingFeatures:
         features = store.features(experiment, bearing)
         if features is None:
-            raise HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
+            raise no_bearing(experiment, bearing)
         return features
+
+    # Not "/health": that is the liveness probe. This is the series behind each condition.
+    @v1.get("/experiments/{experiment}/bearings/{bearing}/health-index")
+    def bearing_health_index(experiment: str, bearing: int) -> HealthIndex:
+        health = store.health_index(experiment, bearing)
+        if health is None:
+            raise no_bearing(experiment, bearing)
+        return health
 
     app.include_router(system)
     app.include_router(v1)

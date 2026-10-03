@@ -30,9 +30,11 @@ Run `just` to list all recipes.
 ## Architecture
 
 - `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
-- `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing; every shorter prefix
-  (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too
+- `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing and its condition; every
+  shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
+- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
+  per snapshot
 - `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.

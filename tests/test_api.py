@@ -10,8 +10,11 @@ from monitor.config import Settings
 from monitor.features import FEATURES, ChannelFeatures
 from monitor.store import ChannelSeries
 
-SNAPSHOTS = 40
+# 30 hours of 10-minute snapshots: the first 24 are the baseline, the rest can raise an alarm.
+SNAPSHOTS = 180
 START = datetime(2004, 2, 12, 10, 0)
+FAULT_FROM = START + timedelta(hours=26)
+ALARM_AT = FAULT_FROM + timedelta(hours=1)
 
 
 def feature_rows(experiment: str, bearing: int, channel: int) -> list[dict[str, object]]:
@@ -38,6 +41,8 @@ def synthetic_features(tmp_path, monkeypatch):
         *feature_rows("set2", bearing=2, channel=2),
     ]
     frame = pd.DataFrame(rows).sample(frac=1, random_state=0)
+    failing = (frame["experiment"] == "set2") & (frame["bearing"] == 1)
+    frame.loc[failing & (frame["timestamp"] >= FAULT_FROM), "env_bpfo"] *= 10
     frame[list(FEATURES)] = frame[list(FEATURES)].astype("float32")
     path = tmp_path / "features.parquet"
     frame.to_parquet(path, index=False)
@@ -114,9 +119,9 @@ def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
     set2 = experiments["set2"]
     assert set2["snapshots"] == SNAPSHOTS
     assert set2["first"] == START.isoformat()
-    assert set2["bearings"] == [
-        {"bearing": 1, "channels": [1], "failure": "outer race"},
-        {"bearing": 2, "channels": [2], "failure": None},
+    assert [(b["bearing"], b["channels"], b["failure"]) for b in set2["bearings"]] == [
+        (1, [1], "outer race"),
+        (2, [2], None),
     ]
     assert experiments["set1"]["bearings"][0]["channels"] == [5, 6]
 
@@ -124,9 +129,47 @@ def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
 def test_bearings_of_an_experiment(tmp_path):
     client = make_client(frontend_dir=tmp_path)
 
-    response = client.get("/api/v1/experiments/set1/bearings")
+    [bearing] = client.get("/api/v1/experiments/set1/bearings").json()
 
-    assert response.json() == [{"bearing": 3, "channels": [5, 6], "failure": "inner race"}]
+    assert (bearing["bearing"], bearing["channels"], bearing["failure"]) == (
+        3,
+        [5, 6],
+        "inner race",
+    )
+
+
+def test_bearings_report_their_latest_condition(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    failing, healthy = client.get("/api/v1/experiments/set2/bearings").json()
+
+    last = (START + timedelta(minutes=10 * (SNAPSHOTS - 1))).isoformat()
+    assert failing["condition"] == {
+        "as_of": last,
+        "status": "alarm",
+        "index": pytest.approx(10, rel=0.1),
+        "driver": "env_bpfo",
+        "diagnosis": "outer race",
+        "alarm_at": ALARM_AT.isoformat(),
+        "crosstalk_from": None,
+    }
+    assert (healthy["condition"]["status"], healthy["condition"]["alarm_at"]) == ("ok", None)
+
+
+def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set2/bearings/1/health-index").json()
+
+    assert (body["experiment"], body["bearing"], body["threshold"]) == ("set2", 1, 2.0)
+    series = list(
+        zip(body["timestamps"], body["index"], body["driver"], body["status"], strict=True)
+    )
+    assert len(series) == SNAPSHOTS
+    # No index while the baseline is recorded, then the alarm from the moment it was raised.
+    assert series[0] == (START.isoformat(), None, None, "baseline")
+    assert {status for _, _, _, status in series[:144]} == {"baseline"}
+    assert [t for t, _, _, status in series if status == "alarm"][0] == ALARM_AT.isoformat()
 
 
 def test_single_experiment_matches_its_entry_in_the_list(tmp_path):
@@ -188,6 +231,7 @@ def test_bearing_with_two_sensors_returns_both_channels(tmp_path):
         "/api/v1/experiments/set2/bearings/3",
         "/api/v1/experiments/set9/bearings/1/features",
         "/api/v1/experiments/set2/bearings/3/features",
+        "/api/v1/experiments/set2/bearings/3/health-index",
     ],
 )
 def test_unknown_experiment_or_bearing_is_404(tmp_path, path):
