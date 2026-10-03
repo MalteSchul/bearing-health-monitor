@@ -45,6 +45,7 @@ NASA Prognostics Data Repository).
 ```bash
 just data      # download (~1 GB) into data/raw/ims and validate it
 just features  # compute data/processed/features.parquet (committed; rerun after changing features)
+just evaluate  # detector results per bearing (tuned on set 2, tested on sets 1 and 3)
 ```
 
 Unpacking needs bsdtar (built into Windows and macOS; `apt install libarchive-tools` on Linux).
