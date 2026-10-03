@@ -1,7 +1,10 @@
 """Health of each bearing in a run, judged against that run's own healthy start.
 
-Every function takes the feature rows of one run: timestamp, bearing, channel and FEATURES.
+A run is the feature rows of one experiment: timestamp, bearing, channel and FEATURES.
 """
+
+from dataclasses import dataclass
+from typing import Literal
 
 import pandas as pd
 
@@ -15,6 +18,9 @@ THRESHOLD = 2.0
 HOLD = pd.Timedelta(hours=1)
 # Longer without data restarts the hold: a gap is no evidence that the index stayed high.
 MAX_GAP = pd.Timedelta(minutes=30)
+# All bearings share one shaft and housing, so a fault reaches the other sensors too, weaker.
+# In set 2 the failing bearing showed its fault 7 x stronger than the loudest neighbour.
+CROSSTALK_FACTOR = 3.0
 
 # The part whose impact rate each envelope feature measures. Time-domain features rise for any
 # fault, so they say that something changed but not where.
@@ -63,3 +69,54 @@ def alarm_time(index: pd.Series) -> pd.Timestamp | None:
             return timestamp
         previous = timestamp
     return None
+
+
+@dataclass(frozen=True)
+class Assessment:
+    bearing: int
+    status: Literal["ok", "alarm", "crosstalk"]
+    alarm_time: pd.Timestamp | None = None
+    # The feature that drove the index most often in the hour before the alarm.
+    feature: str | None = None
+    part: str | None = None
+    # For crosstalk: the bearing whose fault this one picks up.
+    source: int | None = None
+
+
+def _hold_window(frame: pd.DataFrame, at: pd.Timestamp) -> pd.DataFrame:
+    """Rows of a timestamp-indexed frame in the hour that raised an alarm at `at`."""
+    return frame[(frame.index > at - HOLD) & (frame.index <= at)]
+
+
+def crosstalk_source(
+    ratios: pd.DataFrame, bearing: int, feature: str, at: pd.Timestamp
+) -> int | None:
+    """Another bearing that showed `feature` CROSSTALK_FACTOR x stronger in the alarm's hour."""
+    by_bearing = _hold_window(ratios[feature].unstack("bearing"), at).median()
+    stronger = by_bearing.drop(bearing)
+    stronger = stronger[stronger >= CROSSTALK_FACTOR * by_bearing[bearing]]
+    return int(stronger.idxmax()) if len(stronger) else None
+
+
+def assess(run: pd.DataFrame) -> list[Assessment]:
+    ratios = bearing_ratios(run)
+    index = health_index(ratios)
+    assessments = []
+    for bearing in index.index.unique("bearing").tolist():
+        at = alarm_time(index.loc[bearing, "health_index"])
+        if at is None:
+            assessments.append(Assessment(bearing=bearing, status="ok"))
+            continue
+        feature = str(_hold_window(index.loc[bearing], at)["feature"].mode()[0])
+        source = crosstalk_source(ratios, bearing, feature, at)
+        assessments.append(
+            Assessment(
+                bearing=bearing,
+                status="alarm" if source is None else "crosstalk",
+                alarm_time=at,
+                feature=feature,
+                part=PARTS.get(feature),
+                source=source,
+            )
+        )
+    return assessments

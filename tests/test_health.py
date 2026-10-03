@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from monitor.features import FEATURES
-from monitor.health import PARTS, alarm_time, bearing_ratios, health_index
+from monitor.health import PARTS, Assessment, alarm_time, assess, bearing_ratios, health_index
 
 START = pd.Timestamp("2004-02-12 10:00")
 
@@ -110,3 +110,56 @@ def test_alarm_latches_although_the_index_drops_again():
     index = index_series([2.5] * 7 + [1.0] * 20)
 
     assert alarm_time(index) == index.index[6]
+
+
+def fault(frame: pd.DataFrame, bearing: int, feature: str, ratio: float) -> None:
+    """Raise one feature of one bearing from hour 48 on."""
+    frame.loc[after(frame, 48) & (frame["bearing"] == bearing), feature] = ratio
+
+
+def statuses(frame: pd.DataFrame) -> dict[int, Assessment]:
+    return {a.bearing: a for a in assess(frame)}
+
+
+def test_healthy_run_has_no_alarms():
+    assert [a.status for a in assess(run())] == ["ok", "ok"]
+
+
+def test_failing_bearing_alarms_with_its_part():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+
+    result = statuses(frame)[1]
+
+    assert (result.status, result.part) == ("alarm", "outer race")
+    assert result.alarm_time == START + pd.Timedelta(hours=49)
+
+
+def test_neighbour_with_the_same_fault_far_weaker_is_crosstalk():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+    fault(frame, 2, "env_bpfo", 5.0)
+
+    result = statuses(frame)
+
+    assert result[1].status == "alarm"
+    assert (result[2].status, result[2].source) == ("crosstalk", 1)
+
+
+def test_neighbour_with_a_comparable_fault_alarms_too():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+    fault(frame, 2, "env_bpfo", 20.0)
+
+    assert [a.status for a in assess(frame)] == ["alarm", "alarm"]
+
+
+def test_different_faults_on_neighbours_both_alarm():
+    frame = run()
+    fault(frame, 1, "env_bpfi", 38.0)
+    fault(frame, 2, "env_bsf", 5.0)
+
+    result = statuses(frame)
+
+    assert (result[1].status, result[1].part) == ("alarm", "inner race")
+    assert (result[2].status, result[2].part) == ("alarm", "roller element")
