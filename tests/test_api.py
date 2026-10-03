@@ -129,6 +129,33 @@ def test_bearings_of_an_experiment(tmp_path):
     assert response.json() == [{"bearing": 3, "channels": [5, 6], "failure": "inner race"}]
 
 
+def test_single_experiment_matches_its_entry_in_the_list(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    listed = {e["name"]: e for e in client.get("/api/v1/experiments").json()}
+
+    assert client.get("/api/v1/experiments/set2").json() == listed["set2"]
+
+
+def test_single_bearing_matches_its_entry_in_the_list(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    listed = client.get("/api/v1/experiments/set2/bearings").json()
+
+    assert client.get("/api/v1/experiments/set2/bearings/2").json() == listed[1]
+
+
+def test_every_prefix_of_a_bearing_url_is_a_resource(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+    path = "/api/v1/experiments/set2/bearings/1/features"
+    parts = path.split("/")
+
+    prefixes = ["/".join(parts[:n]) for n in range(4, len(parts) + 1)]
+
+    assert prefixes[0] == "/api/v1/experiments"
+    assert [client.get(p).status_code for p in prefixes] == [200] * len(prefixes)
+
+
 def test_bearing_features_are_columnar_and_in_time_order(tmp_path):
     client = make_client(frontend_dir=tmp_path)
 
@@ -155,7 +182,10 @@ def test_bearing_with_two_sensors_returns_both_channels(tmp_path):
 @pytest.mark.parametrize(
     "path",
     [
+        "/api/v1/experiments/set9",
         "/api/v1/experiments/set9/bearings",
+        "/api/v1/experiments/set9/bearings/1",
+        "/api/v1/experiments/set2/bearings/3",
         "/api/v1/experiments/set9/bearings/1/features",
         "/api/v1/experiments/set2/bearings/3/features",
     ],

@@ -46,16 +46,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def experiments() -> list[ExperimentSummary]:
         return store.experiments()
 
-    @v1.get("/experiments/{experiment}/bearings")
-    def bearings(experiment: str) -> list[BearingSummary]:
+    @v1.get("/experiments/{experiment}")
+    def experiment_summary(experiment: str) -> ExperimentSummary:
         summary = store.experiment(experiment)
         if summary is None:
             raise HTTPException(404, f"Unknown experiment {experiment!r}")
-        return summary.bearings
+        return summary
+
+    @v1.get("/experiments/{experiment}/bearings")
+    def bearings(experiment: str) -> list[BearingSummary]:
+        return experiment_summary(experiment).bearings
+
+    @v1.get("/experiments/{experiment}/bearings/{bearing}")
+    def bearing_summary(experiment: str, bearing: int) -> BearingSummary:
+        summary = store.bearing(experiment, bearing)
+        if summary is None:
+            raise HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
+        return summary
 
     @v1.get("/experiments/{experiment}/bearings/{bearing}/features")
     def bearing_features(experiment: str, bearing: int) -> BearingFeatures:
-        features = store.bearing(experiment, bearing)
+        features = store.features(experiment, bearing)
         if features is None:
             raise HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
         return features

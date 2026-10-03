@@ -69,7 +69,8 @@ class FeatureStore:
     def __init__(self, frame: pd.DataFrame) -> None:
         frame = frame.sort_values(["experiment", "channel", "timestamp"])
         self._experiments: dict[str, ExperimentSummary] = {}
-        self._bearings: dict[tuple[str, int], BearingFeatures] = {}
+        self._bearings: dict[tuple[str, int], BearingSummary] = {}
+        self._features: dict[tuple[str, int], BearingFeatures] = {}
         for experiment_key, runs in frame.groupby("experiment", observed=True):
             experiment = str(experiment_key)
             failures = FAILURES.get(experiment, {})
@@ -81,14 +82,14 @@ class FeatureStore:
                     for channel in sorted(rows["channel"].unique().tolist())
                 ]
                 failure = failures.get(bearing)
-                self._bearings[(experiment, bearing)] = BearingFeatures(
+                self._features[(experiment, bearing)] = BearingFeatures(
                     experiment=experiment, bearing=bearing, failure=failure, channels=channels
                 )
-                summaries.append(
-                    BearingSummary(
-                        bearing=bearing, channels=[c.channel for c in channels], failure=failure
-                    )
+                summary = BearingSummary(
+                    bearing=bearing, channels=[c.channel for c in channels], failure=failure
                 )
+                self._bearings[(experiment, bearing)] = summary
+                summaries.append(summary)
             self._experiments[experiment] = ExperimentSummary(
                 name=experiment,
                 first=runs["timestamp"].min(),
@@ -107,5 +108,8 @@ class FeatureStore:
     def experiment(self, name: str) -> ExperimentSummary | None:
         return self._experiments.get(name)
 
-    def bearing(self, experiment: str, bearing: int) -> BearingFeatures | None:
+    def bearing(self, experiment: str, bearing: int) -> BearingSummary | None:
         return self._bearings.get((experiment, bearing))
+
+    def features(self, experiment: str, bearing: int) -> BearingFeatures | None:
+        return self._features.get((experiment, bearing))
