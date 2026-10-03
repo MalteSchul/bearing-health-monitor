@@ -1,10 +1,11 @@
 """The NASA IMS bearing run-to-failure dataset: what the files are and how to check them.
 
-Each experiment is a directory of snapshots: 1-second vibration recordings at 20 kHz named after
-their start time, one tab-separated column per accelerometer channel. Facts below are from the
-readme shipped with the data, corrected where the files disagree with it.
+Each experiment is a directory of snapshots: 1-second vibration recordings named after their start
+time, one tab-separated column per accelerometer channel. Facts below are from the readme shipped
+with the data, corrected where the files disagree with it.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,10 +16,51 @@ import numpy.typing as npt
 import pandas as pd
 
 SAMPLES_PER_SNAPSHOT = 20_480
+# The readme says 20 kHz, but a 1-second snapshot holds 20,480 samples, and set 2's outer-race
+# fault only lands on its theoretical frequency at this rate.
+SAMPLE_RATE_HZ = 20_480
+SHAFT_HZ = 2000 / 60
 TIMESTAMP_FORMAT = "%Y.%m.%d.%H.%M.%S"
 # Below this RMS on every channel a snapshot holds no vibration, only sensor noise. Healthy
 # snapshots sit around 0.05-0.15 V, silent ones around 0.002 V.
 SILENT_RMS_V = 0.01
+
+
+@dataclass(frozen=True)
+class FaultFrequencies:
+    """Rates in Hz at which a defect on each bearing part causes an impact."""
+
+    ftf: float  # cage
+    bpfo: float  # outer race
+    bpfi: float  # inner race
+    # Roller spin. A roller defect strikes both races per turn, so it shows up at 2 x bsf.
+    bsf: float
+
+
+def fault_frequencies(
+    shaft_hz: float,
+    rollers: int,
+    roller_diameter: float,
+    pitch_diameter: float,
+    contact_angle_deg: float,
+) -> FaultFrequencies:
+    ratio = roller_diameter / pitch_diameter * math.cos(math.radians(contact_angle_deg))
+    return FaultFrequencies(
+        ftf=shaft_hz / 2 * (1 - ratio),
+        bpfo=rollers * shaft_hz / 2 * (1 - ratio),
+        bpfi=rollers * shaft_hz / 2 * (1 + ratio),
+        bsf=pitch_diameter / (2 * roller_diameter) * shaft_hz * (1 - ratio**2),
+    )
+
+
+# Rexnord ZA-2115. The readme gives no geometry; it is from Qiu et al. (2006), in inches.
+FAULT_FREQUENCIES = fault_frequencies(
+    shaft_hz=SHAFT_HZ,
+    rollers=16,
+    roller_diameter=0.331,
+    pitch_diameter=2.815,
+    contact_angle_deg=15.17,
+)
 
 
 @dataclass(frozen=True)

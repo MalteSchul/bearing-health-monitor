@@ -23,6 +23,7 @@ dev = [
     "pandas-stubs>=2.2",
     "pre-commit>=3.8",
     "httpx2>=2.13.1",
+    "scipy-stubs>=1.18.1.1",
 ]
 
 [build-system]

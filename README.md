@@ -42,7 +42,8 @@ Run `just` to list all recipes.
 NASA Prognostics Data Repository).
 
 ```bash
-just data    # download (~1 GB) into data/raw/ims and validate it
+just data      # download (~1 GB) into data/raw/ims and validate it
+just features  # compute data/processed/features.parquet (committed; rerun after changing features)
 ```
 
 Unpacking needs bsdtar (built into Windows and macOS; `apt install libarchive-tools` on Linux).

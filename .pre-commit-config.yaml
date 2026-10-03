@@ -8,6 +8,12 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
+        exclude: ^data/processed/
+      # Derived data the app serves is committed on purpose, but should stay small.
+      - id: check-added-large-files
+        name: check for added large files (data/processed, 5 MB)
+        files: ^data/processed/
+        args: [--maxkb=5000]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.10
     hooks:
