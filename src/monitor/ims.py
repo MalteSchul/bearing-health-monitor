@@ -6,8 +6,8 @@ with the data, corrected where the files disagree with it.
 """
 
 import math
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -73,18 +73,20 @@ class Experiment:
     last: datetime
     # Snapshots recorded with all channels silent, presumably after the rig stopped.
     silent_snapshots: frozenset[str] = frozenset()
+    # Bearing -> defect found when the run ended. The readme says nothing about when it started.
+    failures: Mapping[int, str] = field(default_factory=dict)
 
 
 EXPERIMENTS = (
-    # Failed: bearing 3 inner race, bearing 4 roller element. Two accelerometers (x, y) per bearing.
+    # Two accelerometers (x, y) per bearing.
     Experiment(
         name="set1",
         bearings=(1, 1, 2, 2, 3, 3, 4, 4),
         n_snapshots=2_156,
         first=datetime(2003, 10, 22, 12, 6, 24),
         last=datetime(2003, 11, 25, 23, 39, 56),
+        failures={3: "inner race", 4: "roller element"},
     ),
-    # Failed: bearing 1 outer race.
     Experiment(
         name="set2",
         bearings=(1, 2, 3, 4),
@@ -92,9 +94,10 @@ EXPERIMENTS = (
         first=datetime(2004, 2, 12, 10, 32, 39),
         last=datetime(2004, 2, 19, 6, 22, 39),
         silent_snapshots=frozenset({"2004.02.19.06.12.39", "2004.02.19.06.22.39"}),
+        failures={1: "outer race"},
     ),
-    # Failed: bearing 3 outer race. The readme says 4,448 snapshots ending 2004-04-04 19:01:57,
-    # but the archive holds 1,876 more, and the degradation of bearing 3 is in those.
+    # The readme says 4,448 snapshots ending 2004-04-04 19:01:57, but the archive holds 1,876
+    # more, and the degradation of bearing 3 is in those.
     Experiment(
         name="set3",
         bearings=(1, 2, 3, 4),
@@ -102,6 +105,7 @@ EXPERIMENTS = (
         first=datetime(2004, 3, 4, 9, 27, 46),
         last=datetime(2004, 4, 18, 2, 42, 55),
         silent_snapshots=frozenset({"2004.04.18.02.42.55"}),
+        failures={3: "outer race"},
     ),
 )
 
