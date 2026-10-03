@@ -32,6 +32,10 @@ fmt:
 data *args:
     uv run python scripts/ingest_ims.py {{args}}
 
+# Compute features from the raw data into data/processed/features.parquet (~30 s)
+features:
+    uv run python scripts/extract_features.py
+
 # Everything CI checks
 check: lint test
 
