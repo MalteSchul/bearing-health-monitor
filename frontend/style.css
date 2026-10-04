@@ -227,6 +227,12 @@ button {
   font-size: 14px;
 }
 
+/* Their markup is rewritten when the condition changes: a press lands on the span that stays. */
+.facts *,
+.truth * {
+  pointer-events: none;
+}
+
 .truth {
   margin-top: auto;
   padding-top: 10px;

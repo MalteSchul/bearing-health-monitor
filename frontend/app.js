@@ -234,37 +234,67 @@ function conditionFacts(condition) {
   return facts;
 }
 
-function renderCards() {
-  $("bearings").replaceChildren(
-    ...state.cards.map((summary) => {
-      const { condition } = summary;
-      const status = STATUS[condition.status];
-      const card = document.createElement("button");
-      card.className = "card";
-      card.style.setProperty("--status", status.colour);
-      card.setAttribute("aria-pressed", String(summary.bearing === state.bearing));
-      card.addEventListener("click", handle(() => selectBearing(summary.bearing)));
+/** A card's frame, built once per run. A click needs press and release on the same element. */
+function buildCard(bearing) {
+  const card = document.createElement("button");
+  card.className = "card";
+  card.dataset.bearing = String(bearing);
+  card.addEventListener("click", handle(() => selectBearing(bearing)));
+  card.innerHTML = `
+    <span class="card-head">
+      <span class="name">Bearing ${bearing}</span>
+      <span class="pill"></span>
+    </span>
+    <span class="index"><span class="value"></span><small>health index</small></span>
+    <span class="driver"></span>
+    <span class="facts"></span>
+    <span class="truth" title="From the dataset readme. The detector never sees it."></span>`;
+  return card;
+}
 
-      const index = condition.index === null ? "–" : `${condition.index.toFixed(1)}×`;
-      const driver = condition.driver === null ? "&nbsp;" : `driven by ${FEATURES[condition.driver].label}`;
-      const result = resultOf(summary.bearing);
-      const lead = leads(result);
-      card.innerHTML = `
-        <span class="card-head">
-          <span class="name">Bearing ${summary.bearing}</span>
-          <span class="pill">${status.label}</span>
-        </span>
-        <span class="index">${index}<small>health index</small></span>
-        <span class="driver">${driver}</span>
-        <span class="facts">${conditionFacts(condition).join("<br>")}</span>
-        <span class="truth" title="From the dataset readme. The detector never sees it.">
-          <small>Documented at the end · hindsight</small>
-          ${summary.documented_failure ?? "survived"} · <strong>${result.verdict}</strong>
-          ${lead === null ? "" : `<br>${lead}<br>before the run ended`}
-        </span>`;
-      return card;
-    }),
+// The markup last written into each element, so an unchanged part is left alone.
+const written = new WeakMap();
+
+function setMarkup(element, html) {
+  if (written.get(element) === html) return;
+  element.innerHTML = html;
+  written.set(element, html);
+}
+
+function fillCard(card, summary) {
+  const { condition } = summary;
+  const status = STATUS[condition.status];
+  const result = resultOf(summary.bearing);
+  const lead = leads(result);
+  const part = (name) => card.querySelector(`.${name}`);
+  card.style.setProperty("--status", status.colour);
+  card.setAttribute("aria-pressed", String(summary.bearing === state.bearing));
+  part("pill").textContent = status.label;
+  part("value").textContent = condition.index === null ? "–" : `${condition.index.toFixed(1)}×`;
+  part("driver").textContent =
+    condition.driver === null ? " " : `driven by ${FEATURES[condition.driver].label}`;
+  setMarkup(part("facts"), conditionFacts(condition).join("<br>"));
+  setMarkup(
+    part("truth"),
+    `<small>Documented at the end · hindsight</small>
+    ${summary.documented_failure ?? "survived"} · <strong>${result.verdict}</strong>
+    ${lead === null ? "" : `<br>${lead}<br>before the run ended`}`,
   );
+}
+
+/**
+ * Updates the cards in place. A replay refreshes them ten times a second: a card rebuilt between
+ * press and release would swallow the click.
+ */
+function renderCards() {
+  const grid = $("bearings");
+  const bearings = state.cards.map((summary) => String(summary.bearing));
+  const built = [...grid.children].map((card) => card.dataset.bearing);
+  if (grid.dataset.run !== state.run || built.join() !== bearings.join()) {
+    grid.replaceChildren(...state.cards.map((summary) => buildCard(summary.bearing)));
+    grid.dataset.run = state.run;
+  }
+  state.cards.forEach((summary, k) => fillCard(grid.children[k], summary));
 }
 
 // --- chart ------------------------------------------------------------------------------------
@@ -815,9 +845,39 @@ function laneAt(event) {
   return state.bearings[nearest].bearing;
 }
 
-function selectLane(click) {
-  const bearing = laneAt(click.event);
-  if (bearing !== state.bearing) handle(() => selectBearing(bearing))();
+/** Whether a pointer is over the lanes, not over the margins, the key or Plotly's toolbar. */
+function onLanes(event) {
+  const box = $("overview-chart").getBoundingClientRect();
+  const x = event.clientX - box.left;
+  const y = event.clientY - box.top;
+  return x >= MARGIN.l && x <= box.width - MARGIN.r && y >= MARGIN.t && y <= box.height - MARGIN.b;
+}
+
+/**
+ * Lane clicks from the pointer itself rather than plotly_click: Plotly drops a click when its
+ * hover state is redrawn mid-press, which a replay does ten times a second. A press that moves is
+ * a zoom drag, not a click.
+ */
+function watchLaneClicks() {
+  let press = null;
+  $("overview-chart").addEventListener(
+    "pointerdown",
+    (event) => {
+      press = event.button === 0 && onLanes(event) ? event : null;
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (press === null) return;
+      const moved = Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY);
+      press = null;
+      const bearing = laneAt(event);
+      if (moved <= 4 && bearing !== state.bearing) handle(() => selectBearing(bearing))();
+    },
+    true,
+  );
 }
 
 // --- time range -------------------------------------------------------------------------------
@@ -991,7 +1051,7 @@ async function selectBearing(bearing) {
   $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
 
   await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
-  listen("overview-chart", { plotly_relayout: followDrag("overview-chart"), plotly_click: selectLane });
+  listen("overview-chart", { plotly_relayout: followDrag("overview-chart") });
   listen("chart", {
     plotly_relayout: followDrag("chart"),
     plotly_legendclick: featuresOnly,
@@ -1005,6 +1065,7 @@ async function start() {
   $("zoom-all").addEventListener("click", () => showRange(null));
   $("zoom-final").addEventListener("click", () => showRange("final"));
   $("play").addEventListener("click", handle(play, false));
+  watchLaneClicks();
   // Dragging the slider takes over from a running replay.
   $("moment").addEventListener("input", (event) => {
     playing = false;
