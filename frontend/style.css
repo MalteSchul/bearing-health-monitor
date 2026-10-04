@@ -30,10 +30,6 @@ footer {
 }
 
 header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
   padding-top: 32px;
 }
 
@@ -47,10 +43,6 @@ h2 {
   margin: 0;
   font-size: 19px;
   letter-spacing: -0.01em;
-}
-
-header p {
-  margin: 4px 0 0;
 }
 
 .muted {
@@ -97,26 +89,63 @@ button {
   color: var(--surface);
 }
 
-#run-bar {
+/* Dark like a player around the screen, so it never reads as part of the operator's view. */
+#playback {
+  --strip-line: #4a4944;
+  --strip-muted: #b9b8b1;
   position: sticky;
   top: 0;
   z-index: 10;
   display: flex;
   align-items: center;
   gap: 14px;
-  margin: 18px 0 14px;
-  padding: 10px 0;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
+  margin: 18px 0 20px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--bg);
 }
 
-/* The rig's one light. A fixed width, so the bar does not shift when its text changes. */
+#playback > small {
+  flex-shrink: 0;
+  color: var(--strip-muted);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+#playback .segmented {
+  border-color: var(--strip-line);
+  background: none;
+}
+
+#playback .segmented button {
+  padding: 5px 14px;
+}
+
+#playback .segmented button + button {
+  border-left-color: var(--strip-line);
+}
+
+#playback .segmented button:hover {
+  background: #33332f;
+}
+
+#playback .segmented button[aria-pressed="true"] {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+#playback .switch input {
+  accent-color: var(--bg);
+}
+
+/* The rig's one light, heading the operator's view. */
 #machine {
   display: flex;
-  flex-shrink: 0;
   align-items: center;
   gap: 8px;
-  width: 230px;
+  margin: 0 0 12px;
 }
 
 #machine small {
@@ -131,36 +160,36 @@ button {
 
 .play {
   flex-shrink: 0;
-  width: 108px;
-  padding: 8px 0;
-  border: 1px solid var(--line);
+  width: 100px;
+  padding: 5px 0;
+  border: 1px solid var(--strip-line);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: none;
   font-weight: 600;
 }
 
 .play:hover {
-  border-color: var(--line-strong);
+  border-color: var(--strip-muted);
 }
 
 #moment {
   flex: 1;
   min-width: 120px;
-  accent-color: var(--ink);
+  accent-color: var(--bg);
   cursor: pointer;
 }
 
-/* A fixed width, so the bar does not shift while the moment changes. */
+/* A fixed width, so the strip does not shift while the moment changes. */
 #as-of {
   flex-shrink: 0;
-  width: 250px;
+  width: 190px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
 #as-of small {
   display: block;
-  color: var(--muted);
+  color: var(--strip-muted);
   font-size: 12px;
 }
 
