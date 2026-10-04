@@ -87,6 +87,25 @@ def results(features: pd.DataFrame, keep: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def print_table(rows: list[dict[str, object]]) -> None:
+    """One header line, text left and numbers right: pandas splits the header of a row index."""
+    columns = list(rows[0])
+    cells = [[str(row[c]) for c in columns] for row in rows]
+    widths = [max(len(c), *(len(r[i]) for r in cells)) for i, c in enumerate(columns)]
+    numeric = [all(isinstance(row[c], int | float) for row in rows) for c in columns]
+
+    def line(values: list[str]) -> str:
+        padded = (
+            v.rjust(w) if n else v.ljust(w) for v, w, n in zip(values, widths, numeric, strict=True)
+        )
+        return "  ".join(padded).rstrip()
+
+    print(line(columns))
+    print(line(["-" * w for w in widths]))
+    for row in cells:
+        print(line(row))
+
+
 def rate(hits: int, total: int) -> str:
     # Exact (Clopper-Pearson) interval: with 4 failures and 8 survivors, the rates are anecdotes.
     low, high = stats.binomtest(hits, total).proportion_ci(confidence_level=0.95, method="exact")
@@ -100,11 +119,10 @@ def summary(table: pd.DataFrame) -> dict[str, object]:
     false_alarms = int((survivors["verdict"] == "false alarm").sum())
     return {
         "detected": rate(len(detected), len(failed)),
-        "median warning (op h)": round(float(detected["warning_op_h"].median()), 1),
+        "median warning": round(float(detected["warning_op_h"].median()), 1),
         "false alarms": rate(false_alarms, len(survivors)),
-        "per 1000 survivor op h": round(false_alarms / survivors["monitored_op_h"].sum() * 1000, 2),
-        "right part at end": f"{(failed['diagnosis_at_end'] == failed['failure']).sum()}"
-        f"/{len(failed)}",
+        "per 1000 h": round(false_alarms / survivors["monitored_op_h"].sum() * 1000, 2),
+        "right part": f"{(failed['diagnosis_at_end'] == failed['failure']).sum()}/{len(failed)}",
     }
 
 
@@ -116,20 +134,30 @@ def main() -> None:
     detector = tables["all 8 (detector)"]
     print(detector.drop(columns="monitored_op_h").to_string(index=False, na_rep="-"))
 
-    print("\nWarning in operating hours before the run ended, per failure and feature set:")
-    warnings = pd.DataFrame(
-        {
-            name: table[table["failure"] != "-"].set_index(["run", "bearing", "failure"])[
-                "warning_op_h"
-            ]
-            for name, table in tables.items()
-        }
-    )
-    print(warnings.to_string(na_rep="missed"))
+    print("\nWarning in operating hours before the run ended, per failure and feature set:\n")
+    failed = detector[detector["failure"] != "-"]
+    rows: list[dict[str, object]] = [
+        {"run": run, "bearing": bearing, "failure": failure}
+        for run, bearing, failure in failed[["run", "bearing", "failure"]].itertuples(index=False)
+    ]
+    for name, table in tables.items():
+        warning = dict(
+            zip(
+                zip(table["run"], table["bearing"], strict=True), table["warning_op_h"], strict=True
+            )
+        )
+        for row in rows:
+            value = warning[(row["run"], row["bearing"])]
+            row[name] = "missed" if pd.isna(value) else float(value)
+    print_table(rows)
 
-    print("\nSummary per feature set (same alarm rule, same thresholds):")
-    overview = pd.DataFrame({name: summary(table) for name, table in tables.items()}).T
-    print(overview.to_string())
+    print("\nSummary per feature set (same alarm rule, same thresholds):\n")
+    print_table([{"feature set": name, **summary(table)} for name, table in tables.items()])
+    print(
+        "\nmedian warning: operating hours, detected failures only.  per 1000 h: false alarms per"
+        "\n1000 operating hours of surviving bearings.  right part: diagnosis at the end matches"
+        " the readme."
+    )
 
 
 if __name__ == "__main__":
