@@ -543,11 +543,11 @@ button {
   font-size: 12px;
 }
 
-#other-facts {
+.facts {
   margin-top: 12px;
 }
 
-#other-facts summary {
+.facts summary {
   font-size: 14px;
   color: var(--muted);
   cursor: pointer;

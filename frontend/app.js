@@ -1171,15 +1171,16 @@ async function ask() {
 }
 
 /**
- * The answer as text, with each [n] made a link to fact n. The model's text is never parsed as
- * HTML, so whatever it writes stays text; a number that is no fact stays text too, marked.
+ * The answer as text, with each [n] made a link to fact n that shows the fact on hover. The model's
+ * text is never parsed as HTML, so whatever it writes stays text; a number that is no fact stays
+ * text too, marked.
  */
-function answerParts(text, ids) {
+function answerParts(text, facts) {
   return text.split(CITATION).map((part, k) => {
     // split keeps the captured numbers at the odd positions.
     if (k % 2 === 0) return document.createTextNode(part);
     const id = Number(part);
-    if (!ids.has(id)) {
+    if (!facts.has(id)) {
       const unknown = document.createElement("span");
       unknown.className = "unknown-citation";
       unknown.title = "No fact with this number was looked up";
@@ -1189,6 +1190,7 @@ function answerParts(text, ids) {
     const link = document.createElement("a");
     link.href = `#fact-${id}`;
     link.textContent = `[${id}]`;
+    link.title = facts.get(id).text;
     link.addEventListener("click", (event) => {
       event.preventDefault();
       showFact(id);
@@ -1197,10 +1199,11 @@ function answerParts(text, ids) {
   });
 }
 
-/** Scrolls to a cited fact and marks it, so a sentence can be checked against what it rests on. */
+/** Opens and marks a cited fact, so a sentence can be checked against what it rests on. */
 function showFact(id) {
   for (const item of $("reply").querySelectorAll("[aria-current]")) item.removeAttribute("aria-current");
   const item = $(`fact-${id}`);
+  item.closest("details").open = true;
   item.setAttribute("aria-current", "true");
   item.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1217,13 +1220,16 @@ function factItem(source) {
   return item;
 }
 
-/** The cited facts in view, every other fact folded away: without an answer, open. */
+/**
+ * The answer first, its facts folded away: the cited ones and every other one looked up. Without an
+ * answer the facts are all there is, so they open.
+ */
 function renderReply(reply) {
-  const ids = new Set(reply.sources.map((source) => source.id));
+  const facts = new Map(reply.sources.map((source) => [source.id, source]));
   const cited = new Set(
     [...(reply.answer ?? "").matchAll(new RegExp(CITATION, "g"))]
       .map((match) => Number(match[1]))
-      .filter((id) => ids.has(id)),
+      .filter((id) => facts.has(id)),
   );
   const { question, run, moment, bearing, time } = state.asked;
   const asked = document.createElement("strong");
@@ -1232,9 +1238,13 @@ function renderReply(reply) {
   const scope = bearing === null ? "whole rig" : `bearing ${bearing} in focus`;
   $("reply-label").replaceChildren(asked, ` · ${runLabel(run)} as of ${formatTime(time)}${end} · ${scope}`);
   $("answer").hidden = reply.answer === null;
-  $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, ids)));
+  $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, facts)));
   $("answer-note").textContent = reply.note ?? "";
-  $("cited").replaceChildren(...reply.sources.filter((s) => cited.has(s.id)).map(factItem));
+  const citedFold = $("cited-facts");
+  citedFold.hidden = cited.size === 0;
+  citedFold.open = false;
+  citedFold.querySelector("summary").textContent = `Cited facts (${cited.size})`;
+  citedFold.querySelector("ul").replaceChildren(...reply.sources.filter((s) => cited.has(s.id)).map(factItem));
   const others = reply.sources.filter((s) => !cited.has(s.id));
   const folded = $("other-facts");
   folded.querySelector("summary").textContent =
