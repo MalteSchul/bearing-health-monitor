@@ -12,16 +12,18 @@ from bisect import bisect_right
 from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
+from itertools import pairwise
 from typing import Annotated, Literal, Protocol
 
 import anthropic
 from pydantic import BaseModel, StringConstraints
 
-from monitor.health import Condition, machine_condition
+from monitor.health import HOLD, MAX_GAP, Condition, machine_condition
 from monitor.knowledge import Knowledge
 from monitor.store import FeatureStore, HealthIndex
 
-# Hours before the moment at which the index is quoted, so "is it getting worse?" has an answer.
+# Operating hours before the moment at which the index is quoted, so "is it getting worse?" has an
+# answer. Damage only grows while the rig runs, so stops do not count, as in the evaluation.
 TREND_HOURS = (24, 6, 1)
 # Only these have a part and a driver worth explaining; ok and baseline have nothing to explain.
 FLAGGED = ("crosstalk", "alert", "danger")
@@ -206,19 +208,48 @@ def bearing_fact(bearing: int, condition: Condition, name: Callable[[str], str])
     return f"{text} Part signals over the last hour: {listed}; {verdict}."
 
 
+def _running(timestamps: list[datetime]) -> list[timedelta]:
+    """How long the rig had run at each snapshot: a step longer than MAX_GAP is a stop."""
+    running = [timedelta(0)]
+    for before, after in pairwise(timestamps):
+        step = after - before
+        running.append(running[-1] + (step if step <= MAX_GAP else timedelta(0)))
+    return running
+
+
 def trend_fact(bearing: int, health: HealthIndex, moment: datetime) -> str | None:
-    """The index at a few times before the moment, as each was known then."""
-    points = []
-    for hours in TREND_HOURS:
-        i = bisect_right(health.timestamps, moment - timedelta(hours=hours)) - 1
-        if i < 0:
-            continue
-        value = health.index[i]
-        points.append(f"{hours} h earlier {'no index yet' if value is None else f'{value:.1f}x'}")
-    now = health.index[bisect_right(health.timestamps, moment) - 1]
-    if now is None or not points:
+    """The index a few operating hours before the moment, each with the time it was measured, as
+    known then. The last stop and the spread of the last hour are said, so that neither a stop nor
+    one noisy snapshot reads as a trend."""
+    now = bisect_right(health.timestamps, moment) - 1
+    current = health.index[now] if now >= 0 else None
+    if current is None:
         return None
-    return f"Bearing {bearing} health index: {', '.join(points)}, now {now:.1f}x."
+    times, index = health.timestamps[: now + 1], health.index[: now + 1]
+    running = _running(times)
+    points, first = [], now
+    for hours in TREND_HOURS:
+        if running[now] < timedelta(hours=hours):
+            continue
+        i = bisect_right(running, running[now] - timedelta(hours=hours)) - 1
+        first = min(first, i)
+        value = "no index yet" if index[i] is None else f"{index[i]:.1f}x"
+        unit = "operating hour" if hours == 1 else "operating hours"
+        points.append(f"{hours} {unit} earlier ({_time(times[i])}) {value}")
+    if not points:
+        return None
+    text = f"Bearing {bearing} health index: {', '.join(points)}, now {current:.1f}x"
+    # The same hour the part signals cover, up to the latest snapshot.
+    hour = [v for t, v in zip(times, index, strict=True) if t > times[now] - HOLD and v is not None]
+    low, high = f"{min(hour):.1f}", f"{max(hour):.1f}"
+    if low != high:
+        text += f", between {low}x and {high}x over the last hour"
+    text += "."
+    stops = [(a, b) for a, b in pairwise(times[first:]) if b - a > MAX_GAP]
+    if stops:
+        before, after = stops[-1]
+        text += f" The rig stood still between {_time(before)} and {_time(after)}."
+    return text
 
 
 def lookup_starts(conditions: Mapping[int, Condition], focus: int | None) -> dict[str, list[int]]:

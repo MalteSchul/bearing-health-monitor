@@ -116,38 +116,69 @@ def test_rig_shows_its_most_urgent_bearings(statuses, fact):
     assert rig_fact(conditions) == fact
 
 
-def health(values: list[float | None], step: timedelta = timedelta(hours=1)) -> HealthIndex:
-    start = T - step * (len(values) - 1)
+def health(times: list[datetime], values: list[float | None]) -> HealthIndex:
     return HealthIndex(
         experiment="set3",
         bearing=3,
         threshold=2.0,
-        timestamps=[start + step * i for i in range(len(values))],
+        timestamps=times,
         index=values,
         driver=[None] * len(values),
         status=["ok"] * len(values),
     )
 
 
-def test_trend_quotes_the_index_as_known_hours_before():
-    values: list[float | None] = [float(i) for i in range(30)]
+def every_10_minutes(start: datetime, end: datetime) -> list[datetime]:
+    return [
+        start + timedelta(minutes=10 * i) for i in range((end - start) // timedelta(minutes=10) + 1)
+    ]
 
-    fact = trend_fact(3, health(values), T)
+
+def test_trend_steps_back_in_operating_hours_and_says_when_each_value_was_measured():
+    times = every_10_minutes(T - timedelta(hours=25), T)
+    # The index in hours since the start, so each value shows where it was taken.
+    values: list[float | None] = [i / 6 for i in range(len(times))]
+
+    fact = trend_fact(3, health(times, values), T)
 
     assert fact == (
-        "Bearing 3 health index: 24 h earlier 5.0x, 6 h earlier 23.0x, 1 h earlier 28.0x, "
-        "now 29.0x."
+        "Bearing 3 health index: 24 operating hours earlier (2004-04-16 18:00) 1.0x, "
+        "6 operating hours earlier (2004-04-17 12:00) 19.0x, "
+        "1 operating hour earlier (2004-04-17 17:00) 24.0x, now 25.0x, "
+        "between 24.2x and 25.0x over the last hour."
     )
 
 
-def test_trend_skips_times_before_the_run_and_marks_the_baseline():
-    fact = trend_fact(3, health([None, None, 1.5, 3.0, 4.0, 6.0, 9.0]), T)
+def test_a_stop_does_not_count_as_operating_time_and_is_said():
+    before = every_10_minutes(
+        T - timedelta(hours=9, minutes=30), T - timedelta(hours=7, minutes=30)
+    )
+    after = every_10_minutes(T - timedelta(minutes=30), T)
+    values: list[float | None] = [2.0] * len(before) + [3.0] * len(after)
 
-    assert fact == "Bearing 3 health index: 6 h earlier no index yet, 1 h earlier 6.0x, now 9.0x."
+    fact = trend_fact(3, health(before + after, values), T)
+
+    assert fact == (
+        "Bearing 3 health index: 1 operating hour earlier (2004-04-17 10:00) 2.0x, now 3.0x. "
+        "The rig stood still between 2004-04-17 10:30 and 2004-04-17 17:30."
+    )
+
+
+def test_trend_skips_what_the_rig_has_not_run_yet_and_marks_the_baseline():
+    times = every_10_minutes(T - timedelta(hours=8), T)
+    values: list[float | None] = [None if i < 18 else i / 6 for i in range(len(times))]
+
+    fact = trend_fact(3, health(times, values), T)
+
+    assert fact == (
+        "Bearing 3 health index: 6 operating hours earlier (2004-04-17 12:00) no index yet, "
+        "1 operating hour earlier (2004-04-17 17:00) 7.0x, now 8.0x, "
+        "between 7.2x and 8.0x over the last hour."
+    )
 
 
 def test_no_trend_while_the_bearing_learns():
-    assert trend_fact(3, health([None, None]), T) is None
+    assert trend_fact(3, health([T - timedelta(minutes=10), T], [None, None]), T) is None
 
 
 def test_lookup_starts_from_every_status_and_the_flagged_bearings_details_in_rig_order():
