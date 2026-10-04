@@ -38,7 +38,10 @@ Run `just` to list all recipes.
   per snapshot: `baseline`, `ok`, `crosstalk`, `alert` (plan the replacement), `danger` (act now)
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/ratios`: each feature relative to its
   baseline, what the detector compares (the health index is the largest)
-- `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
+- `GET /api/v1/experiments/{experiment}/evaluation`: hindsight per bearing (detected, missed,
+  false alert, quiet) and the operating hours each level came before the run ended
+- `frontend/`: static dashboard, served by the API at `/`. `?run=set2&bearing=1&at=2004-02-16T04:12:39`
+  opens a replay at that moment. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.
 - `data/processed/`: precomputed features shipped with the image. Raw data is never committed.

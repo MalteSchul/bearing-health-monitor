@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import NaiveDatetime
 
 from monitor.config import Settings
+from monitor.evaluation import RunEvaluation
 from monitor.store import (
     BearingFeatures,
     BearingSummary,
@@ -77,6 +78,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @v1.get("/experiments/{experiment}/bearings")
     def bearings(experiment: str, at: AsOf = None) -> list[BearingSummary]:
         return experiment_summary(experiment, at).bearings
+
+    # Hindsight, unlike the conditions: it compares with the state documented at the end of the
+    # run, so it has no `at`.
+    @v1.get("/experiments/{experiment}/evaluation")
+    def experiment_evaluation(experiment: str) -> RunEvaluation:
+        evaluation = store.evaluation(experiment)
+        if evaluation is None:
+            raise HTTPException(404, f"Unknown experiment {experiment!r}")
+        return evaluation
 
     def no_bearing(experiment: str, bearing: int) -> HTTPException:
         return HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")

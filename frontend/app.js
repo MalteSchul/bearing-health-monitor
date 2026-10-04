@@ -70,6 +70,7 @@ const VEIL = "rgba(246, 245, 241, 0.78)";
 // bearings: each bearing's condition at the end of the run, which the charts mark.
 // cards: each bearing's condition as of the moment shown, which the cards report.
 // health: each bearing's health-index series of the current run, which the overview draws.
+// evaluation: the run's verdicts against the documented end, hindsight whatever the moment.
 // moment: index of the snapshot shown, null for the latest.
 // range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
 const state = {
@@ -79,6 +80,7 @@ const state = {
   bearings: [],
   cards: [],
   health: {},
+  evaluation: null,
   moment: null,
   range: null,
 };
@@ -147,15 +149,18 @@ async function selectRun(name, bearing = state.bearing, at = null) {
   playing = false;
   cardsRequest?.abort();
   const experiment = await getJSON(`${API}/experiments/${name}`);
-  const series = await Promise.all(
-    experiment.bearings.map((b) => getJSON(`${API}/experiments/${name}/bearings/${b.bearing}/health-index`)),
-  );
+  const [evaluation, ...series] = await Promise.all([
+    getJSON(`${API}/experiments/${name}/evaluation`),
+    ...experiment.bearings.map((b) => getJSON(`${API}/experiments/${name}/bearings/${b.bearing}/health-index`)),
+  ]);
   // "Final 100 h" means the same in every run; a dragged range does not.
   if (name !== state.run && state.range !== "final") state.range = null;
   state.run = name;
   state.last = experiment.last;
   state.bearings = experiment.bearings;
   state.health = Object.fromEntries(series.map((health) => [health.bearing, health]));
+  state.evaluation = evaluation;
+  renderResult();
 
   // A new run starts at its end unless the address asks for a moment.
   const times = runTimes();
@@ -178,6 +183,34 @@ async function selectRun(name, bearing = state.bearing, at = null) {
 
   const numbers = experiment.bearings.map((b) => b.bearing);
   await selectBearing(numbers.includes(bearing) ? bearing : numbers[0]);
+}
+
+// --- hindsight --------------------------------------------------------------------------------
+
+const resultOf = (bearing) => state.evaluation.bearings.find((r) => r.bearing === bearing);
+const capitalised = (text) => text[0].toUpperCase() + text.slice(1);
+
+/** How early each level came, in operating hours before the run ended; null without an alert. */
+function leads(result) {
+  const parts = [];
+  if (result.alert_lead_op_h !== null) parts.push(`alert ${Math.round(result.alert_lead_op_h)}`);
+  if (result.danger_lead_op_h !== null) parts.push(`danger ${Math.round(result.danger_lead_op_h)}`);
+  return parts.length ? `${parts.join(" · ")} op-h` : null;
+}
+
+const listed = (items) =>
+  items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
+/** The run's result in one line. Hindsight, so it stays put while the replay moves. */
+function renderResult() {
+  const run = state.evaluation;
+  const leadHours = run.bearings
+    .filter((r) => r.verdict === "detected")
+    .map((r) => Math.round(r.alert_lead_op_h));
+  const ahead = leadHours.length ? ` (${listed(leadHours)} op-h before the run ended)` : "";
+  $("run-result").textContent =
+    `Hindsight · documented failures alerted: ${run.failures_alerted} of ${run.failures}${ahead}` +
+    ` · survivors alerted falsely: ${run.false_alerts} of ${run.survivors}`;
 }
 
 // --- bearing cards ----------------------------------------------------------------------------
@@ -214,6 +247,8 @@ function renderCards() {
 
       const index = condition.index === null ? "–" : `${condition.index.toFixed(1)}×`;
       const driver = condition.driver === null ? "&nbsp;" : `driven by ${FEATURES[condition.driver].label}`;
+      const result = resultOf(summary.bearing);
+      const lead = leads(result);
       card.innerHTML = `
         <span class="card-head">
           <span class="name">Bearing ${summary.bearing}</span>
@@ -224,7 +259,8 @@ function renderCards() {
         <span class="facts">${conditionFacts(condition).join("<br>")}</span>
         <span class="truth" title="From the dataset readme. The detector never sees it.">
           <small>Documented at the end · hindsight</small>
-          ${summary.documented_failure ?? "survived"}
+          ${summary.documented_failure ?? "survived"} · <strong>${result.verdict}</strong>
+          ${lead === null ? "" : `<br>${lead}<br>before the run ended`}
         </span>`;
       return card;
     }),
@@ -654,8 +690,16 @@ function laneTicks([low, high], threshold) {
   return ticks.sort((a, b) => a - b);
 }
 
-const hindsight = (summary) =>
-  summary.documented_failure === null ? "survived" : `documented: ${summary.documented_failure}`;
+/** A lane's verdict at its end, with how early each level came. */
+function laneVerdict(summary) {
+  const result = resultOf(summary.bearing);
+  const lines = [`<b>${capitalised(result.verdict)}</b> · ${summary.documented_failure ?? "survived"}`];
+  const lead = leads(result);
+  if (lead !== null) {
+    lines.push(...[lead, "before the run ended"].map((line) => `<span style="color:${MUTED}">${line}</span>`));
+  }
+  return lines.join("<br>");
+}
 
 function drawOverview() {
   const lanes = state.bearings.map((summary) => ({ summary, health: state.health[summary.bearing] }));
@@ -716,9 +760,9 @@ function drawOverview() {
         yshift: 2,
         font: { size: 13, color: INK, weight: selected ? 700 : 500 },
       }),
-      note(hindsight(summary), 1.02, (bottom + top) / 2, {
+      note(laneVerdict(summary), 1.02, (bottom + top) / 2, {
         yanchor: "middle",
-        font: { size: 12, color: MUTED },
+        font: { size: 12, color: INK },
       }),
     );
   });

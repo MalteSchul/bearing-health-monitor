@@ -14,8 +14,9 @@ import pandas as pd
 from scipy import stats
 
 from monitor.config import Settings
+from monitor.evaluation import operating_hours, verdict
 from monitor.features import FEATURES
-from monitor.health import BASELINE, MAX_GAP, History, assess
+from monitor.health import BASELINE, History, assess
 from monitor.ims import EXPERIMENTS
 
 TUNED_ON = {"set2"}
@@ -32,13 +33,6 @@ def hours(since: datetime, time: datetime | None) -> float | None:
     return None if time is None else round((time - since).total_seconds() / 3600, 1)
 
 
-def operating_hours(times: pd.Series, start: datetime, end: datetime) -> float:
-    """Hours the rig ran between two times: steps across a stop do not count."""
-    window = times[(times >= start) & (times <= end)].sort_values()
-    steps = window.diff()
-    return round(float(steps[steps <= MAX_GAP].dt.total_seconds().sum()) / 3600, 1)
-
-
 def restrict(run: pd.DataFrame, keep: list[str]) -> pd.DataFrame:
     """The run with every other feature pinned to a constant, whose ratio never leaves 1."""
     pinned = run.copy()
@@ -53,10 +47,6 @@ def evaluate(
     alert, danger = end.alert_at, end.danger_at
     at_alert = None if alert is None else history.at(alert)
     crosstalk = next((c.as_of for c in history.conditions if c.status == "crosstalk"), None)
-    if failure is None:
-        verdict = "false alarm" if alert else "ok"
-    else:
-        verdict = "detected" if alert else "missed"
     return {
         "bearing": history.bearing,
         "failure": failure or "-",
@@ -71,7 +61,7 @@ def evaluate(
         "diagnosis_at_alert": at_alert.diagnosis if at_alert else None,
         "diagnosis_at_end": end.diagnosis,
         "first_crosstalk_h": hours(start, crosstalk),
-        "verdict": verdict,
+        "verdict": verdict(alert is not None, failure),
         # Survivor hours a false alarm could have happened in.
         "monitored_op_h": operating_hours(times, start + BASELINE, end.as_of),
     }

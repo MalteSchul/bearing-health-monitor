@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
+from monitor.evaluation import RunEvaluation, evaluate_run
 from monitor.features import FEATURES
 from monitor.health import (
     THRESHOLD,
@@ -181,12 +182,19 @@ class FeatureStore:
         self._features: dict[tuple[str, int], BearingFeatures] = {}
         self._health: dict[tuple[str, int], HealthIndex] = {}
         self._ratios: dict[tuple[str, int], FeatureRatios] = {}
+        self._evaluations: dict[str, RunEvaluation] = {}
         for experiment_key, run in frame.groupby("experiment", observed=True):
             experiment = str(experiment_key)
             failures = FAILURES.get(experiment, {})
             # Judged once at startup: every condition depends only on data up to its snapshot,
             # so precomputing them all is the same as judging each snapshot live.
             histories = {h.bearing: h for h in assess(run)}
+            self._evaluations[experiment] = evaluate_run(
+                experiment,
+                [histories[b] for b in sorted(histories)],
+                run["timestamp"].drop_duplicates(),
+                failures,
+            )
             ratios = bearing_ratios(run)
             bearings = {}
             for bearing in sorted(run["bearing"].unique().tolist()):
@@ -245,3 +253,6 @@ class FeatureStore:
 
     def ratios(self, experiment: str, bearing: int) -> FeatureRatios | None:
         return self._ratios.get((experiment, bearing))
+
+    def evaluation(self, experiment: str) -> RunEvaluation | None:
+        return self._evaluations.get(experiment)

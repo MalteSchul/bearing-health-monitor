@@ -318,12 +318,55 @@ def test_bearing_with_two_sensors_returns_both_channels(tmp_path):
         "/api/v1/experiments/set2/bearings/3/features",
         "/api/v1/experiments/set2/bearings/3/health-index",
         "/api/v1/experiments/set2/bearings/3/ratios",
+        "/api/v1/experiments/set9/evaluation",
     ],
 )
 def test_unknown_experiment_or_bearing_is_404(tmp_path, path):
     client = make_client(frontend_dir=tmp_path)
 
     assert client.get(path).status_code == 404
+
+
+def test_evaluation_compares_each_alert_with_the_documented_end(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set2/evaluation").json()
+
+    # No stops in the synthetic run, so operating hours are wall-clock hours.
+    last = START + timedelta(minutes=10 * (SNAPSHOTS - 1))
+    lead = round((last - ALERT_AT).total_seconds() / 3600, 1)
+    assert body == {
+        "experiment": "set2",
+        "bearings": [
+            {
+                "bearing": 1,
+                "documented_failure": "outer race",
+                "verdict": "detected",
+                "alert_lead_op_h": lead,
+                "danger_lead_op_h": None,
+            },
+            {
+                "bearing": 2,
+                "documented_failure": None,
+                "verdict": "quiet",
+                "alert_lead_op_h": None,
+                "danger_lead_op_h": None,
+            },
+        ],
+        "failures": 1,
+        "failures_alerted": 1,
+        "survivors": 1,
+        "false_alerts": 0,
+    }
+
+
+def test_evaluation_counts_a_documented_failure_without_an_alert_as_missed(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set1/evaluation").json()
+
+    assert [(b["bearing"], b["verdict"]) for b in body["bearings"]] == [(3, "missed")]
+    assert (body["failures"], body["failures_alerted"]) == (1, 0)
 
 
 def test_feature_series_are_gzipped_when_the_client_accepts_it(tmp_path):

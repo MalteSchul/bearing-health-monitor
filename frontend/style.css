@@ -262,6 +262,11 @@ button {
   font-size: 14px;
 }
 
+#run-result {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
 #overview-chart,
 #chart {
   margin-top: 12px;
