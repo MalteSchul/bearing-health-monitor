@@ -550,3 +550,14 @@ def test_copilot_limits_questions_per_minute(tmp_path):
     codes = [client.post(COPILOT, json={"question": "Why?"}).status_code for _ in range(3)]
 
     assert codes == [200, 200, 429]
+
+
+def test_docs_declare_the_errors_the_handlers_raise(tmp_path):
+    paths = make_client(frontend_dir=tmp_path).get("/openapi.json").json()["paths"]
+
+    for path, operations in paths.items():
+        if "{experiment}" in path:
+            for operation in operations.values():
+                assert "404" in operation["responses"], path
+    copilot = paths["/api/v1/experiments/{experiment}/copilot"]["post"]
+    assert "429" in copilot["responses"]
