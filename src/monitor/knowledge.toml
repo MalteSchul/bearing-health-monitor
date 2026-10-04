@@ -4,6 +4,7 @@
 # BUILDS_ON points from a rule to the rules it is defined by; a lookup follows those to the end.
 # Ids of statuses, parts and features are the detector's own words, so its output is a start node.
 # Features lead to no part: naming the part is the detector's diagnosis, never the graph's.
+# A `name` is what people call a node whose id is a code name; texts only ever use the name.
 # Never add what happened at the end of a run: that is hindsight, the detector never sees it either.
 
 [sources]
@@ -70,7 +71,7 @@ text = "The bearings' design life is more than 100 million revolutions, about 83
 id = "features"
 label = "Machine"
 source = "detector"
-text = "The monitor reduces each snapshot to 8 features per sensor: rms, peak, crest factor, kurtosis, and the envelope amplitude at each of the four fault frequencies."
+text = "The monitor reduces each snapshot to 8 features per sensor: rms, peak, crest factor, kurtosis, and the outer race, inner race, roller element and cage signals, the envelope amplitudes at the four fault frequencies."
 
 # --- Statuses: what each light means and asks for -----------------------------------------------
 
@@ -121,7 +122,7 @@ text = "Each bearing is compared with its own first 24 hours: the median of each
 id = "health index rule"
 label = "Rule"
 source = "detector"
-text = "The health index is the largest of the bearing's 8 feature ratios to its reference; 1x means as on its first day. The feature behind it is the driver."
+text = "The health index is the largest of the bearing's 8 feature ratios to their reference; 1x means as on its first day. The feature it comes from is the bearing's highest feature."
 out = { BUILDS_ON = ["baseline rule"] }
 
 [[node]]
@@ -149,7 +150,7 @@ out = { BUILDS_ON = ["health index rule", "what and where"] }
 id = "diagnosis rule"
 label = "Rule"
 source = "detector"
-text = "A part is named when its fault frequency's median over the last hour is at least 2x its reference and at least 2x every other part frequency. Otherwise no part is named: either none has risen, as when only time-domain features rise, or several have risen together, as when damage becomes widespread in the last stage, and the highest would be a guess."
+text = "A part is named when its signal's median over the last hour is at least 2x its reference and at least 2x every other part's signal. Otherwise no part is named: either none has risen, as when only rms, peak, crest factor or kurtosis rise, or several have risen together, as when damage becomes widespread in the last stage, and the highest would be a guess."
 out = { BUILDS_ON = ["baseline rule"] }
 
 [[node]]
@@ -209,28 +210,28 @@ text = "For a bearing that only hears a neighbour, act on the source bearing and
 id = "outer race"
 label = "Component"
 source = "textbook"
-text = "Outer race: a defect on it is struck by every passing roller, at BPFO (236.4 Hz here), measured by the env_bpfo feature. The outer race does not rotate, so the defect stays in the load zone and shows clearly."
+text = "Outer race: a defect on it is struck by every passing roller, at BPFO (236.4 Hz here), measured by the outer race signal. The outer race does not rotate, so the defect stays in the load zone and shows clearly."
 out = { DAMAGED_BY = ["subsurface fatigue", "surface fatigue", "indentation", "abrasive wear"] }
 
 [[node]]
 id = "inner race"
 label = "Component"
 source = "textbook"
-text = "Inner race: a defect on it is struck at BPFI (296.9 Hz here), measured by env_bpfi. It rotates with the shaft through the load zone, so its impacts vary in strength and are often weaker at the sensor; impulsiveness (peak, kurtosis) can show it first."
+text = "Inner race: a defect on it is struck at BPFI (296.9 Hz here), measured by the inner race signal. It rotates with the shaft through the load zone, so its impacts vary in strength and are often weaker at the sensor; impulsiveness (peak, kurtosis) can show it first."
 out = { DAMAGED_BY = ["subsurface fatigue", "surface fatigue", "indentation", "abrasive wear"] }
 
 [[node]]
 id = "roller element"
 label = "Component"
 source = "textbook"
-text = "Roller: a defect on a roller strikes both races once per roller spin, at twice BSF (2 x 139.9 Hz), measured by env_bsf. It passes the load zone once per cage turn, so it often also shows at the cage frequency."
+text = "Roller: a defect on a roller strikes both races once per roller spin, at twice BSF (2 x 139.9 Hz), measured by the roller element signal. It passes the load zone once per cage turn, so it often also shows at the cage frequency."
 out = { DAMAGED_BY = ["subsurface fatigue", "surface fatigue", "indentation", "abrasive wear"] }
 
 [[node]]
 id = "cage"
 label = "Component"
 source = "textbook"
-text = "Cage: the cage holds the rollers apart and turns at FTF (14.8 Hz here), measured by env_ftf. A raised cage signal can come from cage damage or from a roller defect."
+text = "Cage: the cage holds the rollers apart and turns at FTF (14.8 Hz here), measured by the cage signal. A raised cage signal can come from cage damage or from a roller defect."
 out = { DAMAGED_BY = ["cage damage"] }
 
 # --- What the detector's features mean when they drive the index -------------------------------
@@ -249,6 +250,7 @@ text = "peak is the largest single value in a snapshot; it rises with isolated i
 
 [[node]]
 id = "crest_factor"
+name = "crest factor"
 label = "Feature"
 source = "textbook"
 text = "Crest factor is peak divided by rms; it is high when a few impacts stand out from the background, typical of early, localised damage."
@@ -261,27 +263,31 @@ text = "Kurtosis measures how impulsive the vibration is (3 for plain noise). It
 
 [[node]]
 id = "env_bpfo"
+name = "outer race signal"
 label = "Feature"
 source = "textbook"
-text = "env_bpfo is the envelope amplitude at the outer-race fault frequency: repeated impacts on an outer race raise it."
+text = "The outer race signal is the envelope amplitude at the outer race's fault frequency (BPFO) and its next two multiples: repeated impacts on an outer race raise it."
 
 [[node]]
 id = "env_bpfi"
+name = "inner race signal"
 label = "Feature"
 source = "textbook"
-text = "env_bpfi is the envelope amplitude at the inner-race fault frequency: repeated impacts on an inner race raise it."
+text = "The inner race signal is the envelope amplitude at the inner race's fault frequency (BPFI) and its next two multiples: repeated impacts on an inner race raise it."
 
 [[node]]
 id = "env_bsf"
+name = "roller element signal"
 label = "Feature"
 source = "textbook"
-text = "env_bsf is the envelope amplitude at the roller fault frequency: a defect on a roller raises it."
+text = "The roller element signal is the envelope amplitude at the roller spin frequency (BSF) and its next two multiples, which include a damaged roller's impacts at twice BSF: a defect on a roller raises it."
 
 [[node]]
 id = "env_ftf"
+name = "cage signal"
 label = "Feature"
 source = "textbook"
-text = "env_ftf is the envelope amplitude at the cage frequency: cage damage or a roller defect raises it."
+text = "The cage signal is the envelope amplitude at the cage frequency (FTF) and its next two multiples: cage damage or a roller defect raises it."
 
 # --- Damage types (ISO 15243 terms) and what to look for -----------------------------------------
 

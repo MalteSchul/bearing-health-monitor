@@ -17,9 +17,11 @@ from monitor.copilot import (
     trend_fact,
 )
 from monitor.health import Condition
+from monitor.knowledge import Knowledge
 from monitor.store import HealthIndex
 
 T = datetime(2004, 4, 17, 18, 0)
+NAME = Knowledge.load().name
 
 
 def condition(status: str, **fields: object) -> Condition:
@@ -43,12 +45,13 @@ def test_flagged_bearing_states_status_since_when_and_part_with_its_evidence():
             alert_at=T - timedelta(hours=30),
             danger_at=T - timedelta(hours=12),
         ),
+        NAME,
     )
 
     assert fact == (
         "Bearing 3: danger since 2004-04-17 06:00 (alert since 2004-04-16 12:00); "
-        "health index right now 56.5x, highest feature env_bpfo. Part frequencies over the "
-        "last hour: outer race 22.6x, inner race 2.1x, roller element 1.8x, cage 1.2x; "
+        "health index right now 56.5x, highest feature: outer race signal. Part signals over "
+        "the last hour: outer race 22.6x, inner race 2.1x, roller element 1.8x, cage 1.2x; "
         "points to the outer race."
     )
 
@@ -64,29 +67,30 @@ def test_crosstalk_names_the_bearing_it_hears_and_its_part():
             diagnosis="outer race",
             crosstalk_from=3,
         ),
+        NAME,
     )
 
-    assert "highest feature env_bpfo; it hears bearing 3." in fact
+    assert "highest feature: outer race signal; it hears bearing 3." in fact
     assert fact.endswith("points to the outer race, the fault it hears.")
 
 
 def test_alert_without_a_clear_part_says_so_with_the_levels():
-    fact = bearing_fact(1, condition("alert", alert_at=T, part_levels=SMEARED))
+    fact = bearing_fact(1, condition("alert", alert_at=T, part_levels=SMEARED), NAME)
 
     assert fact.endswith(
         "outer race 10.0x, roller element 8.8x, cage 7.2x, inner race 7.0x; "
-        "no part frequency stands out clearly."
+        "no part's signal stands out clearly."
     )
 
 
-def test_healthy_bearing_has_no_part_frequencies():
-    assert bearing_fact(1, condition("ok")) == (
-        "Bearing 1: ok; health index right now 1.2x, highest feature rms."
+def test_healthy_bearing_has_no_part_signals():
+    assert bearing_fact(1, condition("ok"), NAME) == (
+        "Bearing 1: ok; health index right now 1.2x, highest feature: rms."
     )
 
 
 def test_bearing_in_baseline_has_no_index():
-    fact = bearing_fact(1, condition("baseline", index=None, driver=None))
+    fact = bearing_fact(1, condition("baseline", index=None, driver=None), NAME)
 
     assert fact == "Bearing 1: learning its baseline (first 24 h), no health index yet."
 
@@ -166,9 +170,9 @@ def test_bearing_in_focus_is_explained_even_when_healthy():
 def test_general_fact_names_every_bearing_whose_word_led_to_it():
     starts = {"alert": [2], "danger": [3, 4], "env_bsf": [3]}
 
-    assert reached_by(starts, ["danger"]) == "For bearing 3 (danger), bearing 4 (danger)"
-    assert reached_by(starts, ["alert", "danger", "env_bsf"]) == (
-        "For bearing 2 (alert), bearing 3 (danger, env_bsf), bearing 4 (danger)"
+    assert reached_by(starts, ["danger"], NAME) == "For bearing 3 (danger), bearing 4 (danger)"
+    assert reached_by(starts, ["alert", "danger", "env_bsf"], NAME) == (
+        "For bearing 2 (alert), bearing 3 (danger, roller element signal), bearing 4 (danger)"
     )
 
 

@@ -441,6 +441,16 @@ def test_copilot_without_a_key_returns_the_facts_but_no_answer(tmp_path):
     assert any("2,000 rpm" in t for t in texts), "machine facts always included"
 
 
+def test_copilot_facts_use_plain_names_never_code_names(tmp_path):
+    client = copilot_client(tmp_path)
+
+    body = client.post(COPILOT, json={"question": "Why?", "bearing": 1}).json()
+
+    texts = " ".join(s["text"] for s in body["sources"])
+    assert "highest feature: outer race signal" in texts
+    assert [code for code in FEATURES if "_" in code and code in texts] == []
+
+
 def test_copilot_sends_the_facts_and_the_tagged_question_to_the_writer(tmp_path):
     writer = FakeWriter()
     client = copilot_client(tmp_path, writer=writer)

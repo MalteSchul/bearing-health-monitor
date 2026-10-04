@@ -1,4 +1,6 @@
 import re
+import tomllib
+from importlib.resources import files
 from typing import get_args
 
 import pytest
@@ -9,6 +11,8 @@ from monitor.ims import FAULT_FREQUENCIES
 from monitor.knowledge import Knowledge
 
 KNOWLEDGE = Knowledge.load()
+# Python identifiers, such as env_bpfo: words for the code, not for people.
+CODE_NAMES = [feature for feature in FEATURES if "_" in feature]
 
 
 def write(tmp_path, text: str):
@@ -21,6 +25,18 @@ def test_every_word_the_detector_reports_is_a_node():
     reported = [*get_args(Status), *PARTS.values(), *FEATURES]
 
     assert [word for word in reported if word not in KNOWLEDGE] == []
+
+
+def test_every_feature_has_a_plain_name():
+    assert [KNOWLEDGE.name(code) for code in CODE_NAMES if "_" in KNOWLEDGE.name(code)] == []
+    assert KNOWLEDGE.name("env_bpfo") == "outer race signal"
+    assert KNOWLEDGE.name("rms") == "rms", "a node without a name is called by its id"
+
+
+def test_no_text_uses_a_code_name():
+    nodes = tomllib.loads(files("monitor").joinpath("knowledge.toml").read_text("utf-8"))["node"]
+
+    assert [n["id"] for n in nodes if any(code in n["text"] for code in CODE_NAMES)] == []
 
 
 def test_machine_facts_cite_the_fault_frequencies_the_detector_uses():

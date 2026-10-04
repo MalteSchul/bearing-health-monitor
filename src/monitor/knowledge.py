@@ -53,7 +53,11 @@ class Knowledge:
             if node["id"] in graph:
                 raise ValueError(f"duplicate node {node['id']!r}")
             graph.add_node(
-                node["id"], label=node["label"], text=node["text"], source=sources[node["source"]]
+                node["id"],
+                name=node.get("name", node["id"]),
+                label=node["label"],
+                text=node["text"],
+                source=sources[node["source"]],
             )
         for node in data["node"]:
             for relation, targets in node.get("out", {}).items():
@@ -65,6 +69,10 @@ class Knowledge:
 
     def __contains__(self, node: str) -> bool:
         return node in self._graph
+
+    def name(self, node: str) -> str:
+        """What people call the node. Its id is the detector's word, which can be a code name."""
+        return str(self._graph.nodes[node]["name"])
 
     def fact(self, node: str) -> Fact:
         attributes = self._graph.nodes[node]

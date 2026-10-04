@@ -152,9 +152,11 @@ def _time(t: datetime) -> str:
     return t.strftime("%Y-%m-%d %H:%M")
 
 
-def bearing_fact(bearing: int, condition: Condition) -> str:
+def bearing_fact(bearing: int, condition: Condition, name: Callable[[str], str]) -> str:
+    """`name` turns the detector's words into what people call them: the model only writes words
+    it is given, so it never sees a code name."""
     c = condition
-    if c.index is None:
+    if c.index is None or c.driver is None:
         return f"Bearing {bearing}: learning its baseline (first 24 h), no health index yet."
     since = ""
     if c.danger_at is not None and c.alert_at is not None:
@@ -164,7 +166,7 @@ def bearing_fact(bearing: int, condition: Condition) -> str:
     # Two windows, said apart: the index is this snapshot, the part an hour's medians.
     text = (
         f"Bearing {bearing}: {c.status}{since}; health index right now {c.index:.1f}x, "
-        f"highest feature {c.driver}"
+        f"highest feature: {name(c.driver)}"
     )
     if c.crosstalk_from is not None:
         text += f"; it hears bearing {c.crosstalk_from}"
@@ -174,13 +176,13 @@ def bearing_fact(bearing: int, condition: Condition) -> str:
     # Highest first, so the margin that decides the part is easy to see.
     levels = sorted(c.part_levels.items(), key=lambda item: item[1], reverse=True)
     if c.diagnosis is None:
-        verdict = "no part frequency stands out clearly"
+        verdict = "no part's signal stands out clearly"
     elif c.crosstalk_from is not None:
         verdict = f"points to the {c.diagnosis}, the fault it hears"
     else:
         verdict = f"points to the {c.diagnosis}"
     listed = ", ".join(f"{part} {level:.1f}x" for part, level in levels)
-    return f"{text} Part frequencies over the last hour: {listed}; {verdict}."
+    return f"{text} Part signals over the last hour: {listed}; {verdict}."
 
 
 def trend_fact(bearing: int, health: HealthIndex, moment: datetime) -> str | None:
@@ -215,13 +217,15 @@ def lookup_starts(conditions: Mapping[int, Condition], focus: int | None) -> dic
     return {word: sorted(bearings) for word, bearings in starts.items()}
 
 
-def reached_by(starts: Mapping[str, list[int]], origins: list[str]) -> str:
+def reached_by(
+    starts: Mapping[str, list[int]], origins: list[str], name: Callable[[str], str]
+) -> str:
     """The bearings whose words led to a fact: general advice such as "replace the bearing" then
     says which bearings it concerns, instead of leaving that to the model."""
     words: dict[int, list[str]] = {}
     for origin in origins:
         for bearing in starts[origin]:
-            words.setdefault(bearing, []).append(origin)
+            words.setdefault(bearing, []).append(name(origin))
     return "For " + ", ".join(f"bearing {b} ({', '.join(w)})" for b, w in sorted(words.items()))
 
 
@@ -256,9 +260,10 @@ class Copilot:
         """
         moment = max(c.as_of for c in conditions.values())
         ref = f"Detector, as of {_time(moment)}"
+        name = self._knowledge.name
         detector = []
         for b in sorted(conditions):
-            detector.append(bearing_fact(b, conditions[b]))
+            detector.append(bearing_fact(b, conditions[b], name))
             health = self._store.health_index(experiment, b)
             trend = None if health is None else trend_fact(b, health, moment)
             if trend:
@@ -268,7 +273,7 @@ class Copilot:
             ("detector", text, ref) for text in detector
         ]
         facts += [
-            ("knowledge", f"{reached_by(starts, origins)}: {f.text}", f.source)
+            ("knowledge", f"{reached_by(starts, origins, name)}: {f.text}", f.source)
             for f, origins in self._knowledge.around(starts)
         ]
         facts += [("knowledge", f.text, f.source) for f in self._knowledge.machine()]
