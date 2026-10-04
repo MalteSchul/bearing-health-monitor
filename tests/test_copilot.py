@@ -129,7 +129,7 @@ def test_lookup_starts_from_every_status_and_the_flagged_bearings_details_in_rig
     conditions = {
         3: condition("danger", driver="env_bpfo", diagnosis="outer race"),
         1: condition("ok"),
-        2: condition("crosstalk", driver="env_bpfo", diagnosis="outer race"),
+        2: condition("crosstalk", driver="env_bpfo", diagnosis="outer race", crosstalk_from=3),
         4: condition("danger", driver="env_bsf"),
     }
 
@@ -138,11 +138,22 @@ def test_lookup_starts_from_every_status_and_the_flagged_bearings_details_in_rig
     assert starts == {
         "ok": [1],
         "crosstalk": [2],
-        "outer race": [2, 3],
-        "env_bpfo": [2, 3],
+        "outer race": [3],
+        "env_bpfo": [3],
         "danger": [3, 4],
         "env_bsf": [4],
     }, "a healthy bearing's driver is noise"
+
+
+def test_a_bearing_that_only_hears_a_neighbour_passes_the_fault_to_that_neighbour():
+    conditions = {
+        1: condition("crosstalk", driver="env_bpfo", diagnosis="outer race", crosstalk_from=3),
+        3: condition("ok", driver="env_bpfo"),
+    }
+
+    starts = lookup_starts(conditions, focus=1)
+
+    assert starts == {"crosstalk": [1], "outer race": [3], "env_bpfo": [3], "ok": [3]}
 
 
 def test_bearing_in_focus_is_explained_even_when_healthy():

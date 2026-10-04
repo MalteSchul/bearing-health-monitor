@@ -15,6 +15,9 @@ import networkx as nx
 # Two hops reach from a part to its damage types and their causes, or from a status to the rules
 # and actions behind it. A third would pull in most of the graph.
 HOPS = 2
+# A rule is only understood with the rules it is defined by, however deep, so these arrows are
+# followed to the end: danger needs the alert rule, which needs the health index, then the baseline.
+BUILDS_ON = "BUILDS_ON"
 # Sent with every question, whatever it is about.
 MACHINE = "Machine"
 
@@ -31,6 +34,9 @@ class Fact:
 class Knowledge:
     def __init__(self, graph: nx.DiGraph) -> None:
         self._graph = graph
+        self._definitions = nx.subgraph_view(
+            graph, filter_edge=lambda a, b: graph.edges[a, b]["type"] == BUILDS_ON
+        )
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Knowledge":
@@ -70,16 +76,21 @@ class Knowledge:
         return [self.fact(n) for n, label in self._graph.nodes(data="label") if label == MACHINE]
 
     def around(self, starts: Iterable[str]) -> list[tuple[Fact, list[str]]]:
-        """Each start and what its arrows reach within HOPS, nearest first, without repeats, each
-        with the starts that reached it: why it was looked up, which a bare fact cannot say.
+        """Each start and what its arrows reach within HOPS, then every rule those build on; nearest
+        first, without repeats, each with the starts that reached it: why it was looked up, which a
+        bare fact cannot say.
 
         Arrows are only followed forwards, from what the detector reports towards what explains it.
-        In Cypher: MATCH (s {id: $start})-[*0..2]->(n) RETURN n, collect(s.id).
+        In Cypher: MATCH (s {id: $start})-[*0..2]->()-[:BUILDS_ON*0..]->(n) RETURN n, collect(s.id).
         """
         reached_from: dict[str, list[str]] = {}
         for start in starts:
-            # Breadth-first, so the dict comes back ordered by distance.
-            for node in nx.single_source_shortest_path_length(self._graph, start, cutoff=HOPS):
+            # Breadth-first, so the lists come back ordered by distance.
+            near = list(nx.single_source_shortest_path_length(self._graph, start, cutoff=HOPS))
+            deep = [
+                d for n in near for d in nx.single_source_shortest_path_length(self._definitions, n)
+            ]
+            for node in [*near, *deep]:
                 origins = reached_from.setdefault(node, [])
                 if start not in origins:
                     origins.append(start)

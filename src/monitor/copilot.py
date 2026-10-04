@@ -205,12 +205,14 @@ def lookup_starts(conditions: Mapping[int, Condition], focus: int | None) -> dic
     starts: dict[str, list[int]] = {}
     for bearing in sorted(conditions):
         c = conditions[bearing]
-        words: list[str] = [c.status]
+        starts.setdefault(c.status, []).append(bearing)
         if c.status in FLAGGED or bearing == focus:
-            words += [word for word in (c.diagnosis, c.driver) if word]
-        for word in words:
-            starts.setdefault(word, []).append(bearing)
-    return starts
+            # A bearing that only hears a neighbour shows the neighbour's fault, not one of its own.
+            owner = bearing if c.crosstalk_from is None else c.crosstalk_from
+            for word in (c.diagnosis, c.driver):
+                if word and owner not in starts.setdefault(word, []):
+                    starts[word].append(owner)
+    return {word: sorted(bearings) for word, bearings in starts.items()}
 
 
 def reached_by(starts: Mapping[str, list[int]], origins: list[str]) -> str:

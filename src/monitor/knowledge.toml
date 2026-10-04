@@ -1,7 +1,9 @@
 # What the copilot may know beyond the detector's numbers. Each node is one fact with its source.
 # `out` lists the arrows leaving a node, by relationship type; they point from what the detector
 # reports towards what explains it, so a lookup only ever follows them forwards.
+# BUILDS_ON points from a rule to the rules it is defined by; a lookup follows those to the end.
 # Ids of statuses, parts and features are the detector's own words, so its output is a start node.
+# Features lead to no part: naming the part is the detector's diagnosis, never the graph's.
 # Never add what happened at the end of a run: that is hindsight, the detector never sees it either.
 
 [sources]
@@ -84,7 +86,7 @@ id = "ok"
 label = "Status"
 source = "detector"
 text = "OK (green): no feature has held at 2x its baseline for an hour on the bearing's own evidence; no action."
-out = { DECIDED_BY = ["health index rule", "alert rule"] }
+out = { DECIDED_BY = ["alert rule"] }
 
 [[node]]
 id = "crosstalk"
@@ -120,36 +122,42 @@ id = "health index rule"
 label = "Rule"
 source = "detector"
 text = "The health index is the largest of the bearing's 8 feature ratios to its reference; 1x means as on its first day. The feature behind it is the driver."
+out = { BUILDS_ON = ["baseline rule"] }
 
 [[node]]
 id = "alert rule"
 label = "Rule"
 source = "detector"
-text = "An alert is raised when the health index has held at 2x or more for one operating hour on the bearing's own evidence; a stop longer than 30 minutes restarts the hour. An alert stays until maintenance."
+text = "An alert is raised when the health index has held at 2x or more for one operating hour on the bearing's own evidence; a stop longer than 30 minutes restarts the hour."
+out = { BUILDS_ON = ["health index rule"] }
 
 [[node]]
 id = "danger rule"
 label = "Rule"
 source = "detector"
-text = "Danger is raised when an alerted bearing's rms, its overall vibration energy, has also held at 2x or more for one hour. Danger stays until maintenance."
+text = "Danger is raised when an alerted bearing's rms, its overall vibration energy, has also held at 2x or more for one hour."
+out = { BUILDS_ON = ["alert rule"] }
 
 [[node]]
 id = "crosstalk rule"
 label = "Rule"
 source = "detector"
 text = "A raised index counts as crosstalk when another bearing shows the same strongest feature at least 3x louder over the last hour; those snapshots are not the bearing's own evidence."
+out = { BUILDS_ON = ["health index rule", "what and where"] }
 
 [[node]]
 id = "diagnosis rule"
 label = "Rule"
 source = "detector"
 text = "A part is named when its fault frequency's median over the last hour is at least 2x its reference and at least 2x every other part frequency. Otherwise no part is named: either none has risen, as when only time-domain features rise, or several have risen together, as when damage becomes widespread in the last stage, and the highest would be a guess."
+out = { BUILDS_ON = ["baseline rule"] }
 
 [[node]]
 id = "equal loudness"
 label = "Rule"
 source = "detector"
 text = "When two bearings show the same fault about equally loud, loudness cannot tell which one is the source, so both are flagged; only an inspection decides."
+out = { BUILDS_ON = ["what and where"] }
 
 [[node]]
 id = "no recovery"
@@ -256,28 +264,24 @@ id = "env_bpfo"
 label = "Feature"
 source = "textbook"
 text = "env_bpfo is the envelope amplitude at the outer-race fault frequency: repeated impacts on an outer race raise it."
-out = { POINTS_TO = ["outer race"] }
 
 [[node]]
 id = "env_bpfi"
 label = "Feature"
 source = "textbook"
 text = "env_bpfi is the envelope amplitude at the inner-race fault frequency: repeated impacts on an inner race raise it."
-out = { POINTS_TO = ["inner race"] }
 
 [[node]]
 id = "env_bsf"
 label = "Feature"
 source = "textbook"
 text = "env_bsf is the envelope amplitude at the roller fault frequency: a defect on a roller raises it."
-out = { POINTS_TO = ["roller element"] }
 
 [[node]]
 id = "env_ftf"
 label = "Feature"
 source = "textbook"
 text = "env_ftf is the envelope amplitude at the cage frequency: cage damage or a roller defect raises it."
-out = { POINTS_TO = ["cage"] }
 
 # --- Damage types (ISO 15243 terms) and what to look for -----------------------------------------
 
@@ -314,7 +318,7 @@ id = "cage damage"
 label = "FailureMode"
 source = "skf-damage"
 text = "Cage wear or fracture: look for worn roller pockets or cracks; it usually follows poor lubrication, misalignment or damaged rollers."
-out = { CAUSED_BY = ["poor lubrication", "misalignment"] }
+out = { CAUSED_BY = ["poor lubrication", "misalignment", "roller element"] }
 
 # --- Causes and what to check -------------------------------------------------------------------
 

@@ -49,11 +49,31 @@ def test_part_leads_to_its_damage_types_and_their_causes():
 
 
 def test_lookup_stops_after_two_hops():
-    # env_bpfo -> outer race -> damage types; their causes would be a third hop.
-    ids = {f.id for f, _ in KNOWLEDGE.around(["env_bpfo"])}
+    # cage -> cage damage -> roller element; the roller's damage types would be a third hop.
+    ids = {f.id for f, _ in KNOWLEDGE.around(["cage"])}
 
-    assert {"outer race", "subsurface fatigue"} <= ids
-    assert "end of life" not in ids
+    assert {"cage damage", "roller element"} <= ids
+    assert "subsurface fatigue" not in ids
+
+
+@pytest.mark.parametrize("feature", FEATURES)
+def test_a_feature_never_leads_to_a_part(feature):
+    # Naming the part is the detector's diagnosis; a feature pointing to one would guess it again.
+    assert "Component" not in {f.label for f, _ in KNOWLEDGE.around([feature])}
+
+
+@pytest.mark.parametrize("status", ["ok", "crosstalk", "alert", "danger"])
+def test_every_status_with_an_index_reaches_its_definition(status):
+    ids = {f.id for f, _ in KNOWLEDGE.around([status])}
+
+    assert {"health index rule", "baseline rule"} <= ids
+
+
+def test_rules_bring_the_rules_they_build_on_however_deep():
+    # danger -> danger rule -> alert rule -> health index rule -> baseline rule: four arrows.
+    reached = {f.id: origins for f, origins in KNOWLEDGE.around(["danger"])}
+
+    assert reached["baseline rule"] == ["danger"]
 
 
 def test_arrows_are_only_followed_forwards():
