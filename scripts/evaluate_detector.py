@@ -122,7 +122,9 @@ def summary(table: pd.DataFrame) -> dict[str, object]:
         "median warning": round(float(detected["warning_op_h"].median()), 1),
         "false alarms": rate(false_alarms, len(survivors)),
         "per 1000 h": round(false_alarms / survivors["monitored_op_h"].sum() * 1000, 2),
-        "right part": f"{(failed['diagnosis_at_end'] == failed['failure']).sum()}/{len(failed)}",
+        "right part": rate(
+            int((failed["diagnosis_at_end"] == failed["failure"]).sum()), len(failed)
+        ),
     }
 
 
