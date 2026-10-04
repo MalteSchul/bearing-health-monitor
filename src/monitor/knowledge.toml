@@ -123,7 +123,7 @@ text = "Each bearing is compared with its own first 24 hours: the median of each
 id = "health index rule"
 label = "Rule"
 source = "detector"
-text = "The health index is the largest of the bearing's 8 feature ratios to their reference; 1x means as on its first day. The feature it comes from is the bearing's highest feature."
+text = "The health index is the largest of the bearing's 8 feature ratios to their reference; 1x means as on its first day. The feature with that largest ratio is called the bearing's highest feature."
 out = { BUILDS_ON = ["baseline rule"] }
 
 [[node]]
