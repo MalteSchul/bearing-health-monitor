@@ -36,6 +36,10 @@ data *args:
 features:
     uv run python scripts/extract_features.py
 
+# Evaluate the detector on all three runs: warning time, diagnosis, false alarms
+evaluate:
+    uv run python scripts/evaluate_detector.py
+
 # Everything CI checks
 check: lint test
 

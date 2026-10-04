@@ -30,7 +30,12 @@ Run `just` to list all recipes.
 ## Architecture
 
 - `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
+- `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing and its condition; every
+  shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too.
+  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
+- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
+  per snapshot
 - `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.
@@ -45,6 +50,7 @@ NASA Prognostics Data Repository).
 ```bash
 just data      # download (~1 GB) into data/raw/ims and validate it
 just features  # compute data/processed/features.parquet (committed; rerun after changing features)
+just evaluate  # detector results per bearing and vs. rms alone (tuned on set 2, tested on sets 1 and 3)
 ```
 
 Unpacking needs bsdtar (built into Windows and macOS; `apt install libarchive-tools` on Linux).
