@@ -21,10 +21,12 @@ const ENVELOPE = {
   env_bsf: { label: "roller (BSF)", colour: "#1baf7a" },
   env_ftf: { label: "cage (FTF)", colour: "#eda100" },
 };
+// rms decides danger, so it takes the darkest slot, a wider line and the top layer. The pink
+// (below 3:1 on white) goes to crest factor, which is only peak over rms.
 const TIME_DOMAIN = {
-  rms: { label: "rms", colour: "#e87ba4" },
+  rms: { label: "rms", colour: "#4a3aa7", width: 2 },
   peak: { label: "peak", colour: "#008300" },
-  crest_factor: { label: "crest factor", colour: "#4a3aa7" },
+  crest_factor: { label: "crest factor", colour: "#e87ba4" },
   kurtosis: { label: "kurtosis", colour: "#e34948" },
 };
 const FEATURES = { ...ENVELOPE, ...TIME_DOMAIN };
@@ -360,7 +362,8 @@ function drawChart(health, ratios, condition) {
         y: features[k],
         yaxis: envelope ? "y2" : "y3",
         legend: envelope ? "legend2" : "legend3",
-        line: { color: FEATURES[name].colour, width: 0.9 },
+        line: { color: FEATURES[name].colour, width: FEATURES[name].width ?? 0.9 },
+        zorder: FEATURES[name].width ? 1 : 0,
         hovertemplate: `%{y:.2f}×<extra>${FEATURES[name].label}</extra>`,
       };
     }),
