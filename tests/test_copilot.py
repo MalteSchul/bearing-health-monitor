@@ -26,13 +26,18 @@ def condition(status: str, **fields: object) -> Condition:
     return Condition(as_of=T, status=status, **{**defaults, **fields})  # type: ignore[arg-type]
 
 
-def test_flagged_bearing_states_status_since_when_and_part():
+OUTER_RACE = {"outer race": 22.6, "inner race": 2.07, "roller element": 1.8, "cage": 1.2}
+SMEARED = {"outer race": 10.0, "inner race": 7.0, "roller element": 8.8, "cage": 7.2}
+
+
+def test_flagged_bearing_states_status_since_when_and_part_with_its_evidence():
     fact = bearing_fact(
         3,
         condition(
             "danger",
             index=56.5,
             driver="env_bpfo",
+            part_levels=OUTER_RACE,
             diagnosis="outer race",
             alert_at=T - timedelta(hours=30),
             danger_at=T - timedelta(hours=12),
@@ -41,23 +46,42 @@ def test_flagged_bearing_states_status_since_when_and_part():
 
     assert fact == (
         "Bearing 3: danger since 2004-04-17 06:00 (alert since 2004-04-16 12:00); "
-        "health index 56.5x, driven by env_bpfo; diagnosed part: outer race."
+        "health index right now 56.5x, highest feature env_bpfo. Part frequencies over the "
+        "last hour: outer race 22.6x, inner race 2.1x, roller element 1.8x, cage 1.2x; "
+        "points to the outer race."
     )
 
 
-def test_crosstalk_names_the_bearing_it_hears():
+def test_crosstalk_names_the_bearing_it_hears_and_its_part():
     fact = bearing_fact(
         2,
         condition(
-            "crosstalk", index=4.9, driver="env_bpfo", diagnosis="outer race", crosstalk_from=3
+            "crosstalk",
+            index=4.9,
+            driver="env_bpfo",
+            part_levels=OUTER_RACE,
+            diagnosis="outer race",
+            crosstalk_from=3,
         ),
     )
 
-    assert "it hears bearing 3, whose signal points to the outer race" in fact
+    assert "highest feature env_bpfo; it hears bearing 3." in fact
+    assert fact.endswith("points to the outer race, the fault it hears.")
 
 
-def test_alert_without_a_part_says_so():
-    assert "diagnosed part: none" in bearing_fact(1, condition("alert", alert_at=T))
+def test_alert_without_a_clear_part_says_so_with_the_levels():
+    fact = bearing_fact(1, condition("alert", alert_at=T, part_levels=SMEARED))
+
+    assert fact.endswith(
+        "outer race 10.0x, roller element 8.8x, cage 7.2x, inner race 7.0x; "
+        "no part frequency stands out clearly."
+    )
+
+
+def test_healthy_bearing_has_no_part_frequencies():
+    assert bearing_fact(1, condition("ok")) == (
+        "Bearing 1: ok; health index right now 1.2x, highest feature rms."
+    )
 
 
 def test_bearing_in_baseline_has_no_index():

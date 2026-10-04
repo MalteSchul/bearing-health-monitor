@@ -150,6 +150,9 @@ def test_bearings_report_their_latest_condition(tmp_path):
         "status": "alert",
         "index": pytest.approx(10, rel=0.1),
         "driver": "env_bpfo",
+        "part_levels": pytest.approx(
+            {"outer race": 10, "inner race": 1, "roller element": 1, "cage": 1}, rel=0.1
+        ),
         "diagnosis": "outer race",
         "alert_at": ALERT_AT.isoformat(),
         "danger_at": None,

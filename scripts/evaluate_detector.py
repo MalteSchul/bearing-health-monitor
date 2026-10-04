@@ -3,8 +3,9 @@
     uv run python scripts/evaluate_detector.py
 
 Reads the feature table the app serves. Thresholds were chosen on set 2 only; sets 1 and 3 are
-evaluated unchanged, so their numbers are the honest ones. The danger level came after all runs
-had been seen; it adds no new number, but it is not held out. The same detector is also run on
+evaluated unchanged, so their numbers are the honest ones. The danger level and the margin a part
+needs before it is named came after all runs had been seen; they add no new number, but they are
+not held out. The same detector is also run on
 feature subsets: rms alone is the usual overall-level alarm, the others show what each domain adds.
 """
 
@@ -119,9 +120,12 @@ def summary(table: pd.DataFrame, warning: str = "warning_op_h") -> dict[str, obj
     }
 
 
-def right_part(table: pd.DataFrame) -> str:
+def parts(table: pd.DataFrame) -> str:
+    """Right, wrong and no part named at the end: naming none is no answer, a wrong one misleads."""
     failed = table[table["failure"] != "-"]
-    return rate(int((failed["diagnosis_at_end"] == failed["failure"]).sum()), len(failed))
+    named = int(failed["diagnosis_at_end"].notna().sum())
+    right = int((failed["diagnosis_at_end"] == failed["failure"]).sum())
+    return f"{right} / {named - right} / {len(failed) - named}"
 
 
 def main() -> None:
@@ -152,7 +156,7 @@ def main() -> None:
     print("\nSummary per feature set (same alert rule, same thresholds):\n")
     print_table(
         [
-            {"feature set": name, **summary(table), "right part": right_part(table)}
+            {"feature set": name, **summary(table), "part right/wrong/none": parts(table)}
             for name, table in tables.items()
         ]
     )
@@ -163,7 +167,7 @@ def main() -> None:
     print(
         "\nmedian warning: operating hours from the level to the end, detected failures only."
         "\nper 1000 h: false alarms per 1000 operating hours of surviving bearings."
-        "\nright part: diagnosis at the end matches the readme."
+        "\npart: diagnosis at the end against the readme, or no part named."
     )
 
 

@@ -64,7 +64,9 @@ class Condition:
     # The largest feature ratio and the feature it comes from; None during the baseline.
     index: float | None = None
     driver: str | None = None
-    # Not for baseline and ok: the part whose fault frequency stood out over the last hour.
+    # Not for baseline and ok: each part frequency's median over the last hour, as a multiple of
+    # its baseline, and the part that clearly stood out among them, if one did.
+    part_levels: dict[str, float] | None = None
     diagnosis: str | None = None
     alert_at: Timestamp | None = None
     danger_at: Timestamp | None = None
@@ -171,10 +173,18 @@ def loudest_neighbour(recent: npt.NDArray[np.float64], bearing: int) -> tuple[in
     return loudest, float(loudness[loudest] / own)
 
 
-def diagnose(recent: npt.NDArray[np.float64]) -> str | None:
-    """The part whose envelope feature stood out most in one bearing's medians, if any did."""
-    strongest = max(ENVELOPE, key=lambda k: recent[k])
-    return PARTS[FEATURES[strongest]] if recent[strongest] >= THRESHOLD else None
+def part_levels(recent: npt.NDArray[np.float64]) -> dict[str, float]:
+    """Each part's envelope feature from one bearing's medians over the last hour."""
+    return {PARTS[FEATURES[k]]: round(float(recent[k]), 3) for k in ENVELOPE}
+
+
+def diagnose(levels: dict[str, float]) -> str | None:
+    """The part whose fault frequency clearly stood out: THRESHOLD x its baseline and THRESHOLD x
+    every other part frequency. When several rise together, as damage spreads in the last stage,
+    the highest is a guess. Added after all runs had been seen, but it adds no new number.
+    """
+    *_, (second, _), (top, part) = sorted((level, part) for part, level in levels.items())
+    return part if top >= THRESHOLD and top >= THRESHOLD * second else None
 
 
 def assess(run: pd.DataFrame) -> list[History]:
@@ -224,13 +234,15 @@ def assess(run: pd.DataFrame) -> list[History]:
             elif alert_at is not None:
                 status = "alert"
             source = loudest_neighbour(recent[i], position)[0] if crosstalk else None
+            levels = None if status == "ok" else part_levels(recent[i, position])
             conditions.append(
                 Condition(
                     as_of=time,
                     status=status,
                     index=float(value),
                     driver=str(driver),
-                    diagnosis=None if status == "ok" else diagnose(recent[i, position]),
+                    part_levels=levels,
+                    diagnosis=None if levels is None else diagnose(levels),
                     alert_at=alert_at,
                     danger_at=danger_at,
                     crosstalk_from=None if source is None else int(bearings[source]),

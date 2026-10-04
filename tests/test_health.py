@@ -168,6 +168,38 @@ def test_time_domain_fault_alerts_without_naming_a_part():
     assert (condition.status, condition.driver, condition.diagnosis) == ("alert", "kurtosis", None)
 
 
+@pytest.mark.parametrize(
+    ("outer", "roller", "diagnosis"),
+    [(7.0, 3.0, "outer race"), (5.0, 3.0, None), (5.0, 5.0, None)],
+)
+def test_part_is_named_only_when_its_frequency_stands_out_clearly(outer, roller, diagnosis):
+    frame = run()
+    fault(frame, 1, "env_bpfo", outer)
+    fault(frame, 1, "env_bsf", roller)
+
+    condition = latest(frame)[1]
+
+    assert (condition.status, condition.diagnosis) == ("alert", diagnosis)
+    assert condition.part_levels == {
+        "outer race": outer,
+        "inner race": 1.0,
+        "roller element": roller,
+        "cage": 1.0,
+    }
+
+
+def test_part_levels_are_given_only_where_a_part_is_judged():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+    fault(frame, 2, "env_bpfo", 5.0)
+    history = assess(frame)[1]
+
+    assert history.at(hour(1)).part_levels is None
+    assert history.at(hour(30)).part_levels is None
+    assert history.conditions[-1].status == "crosstalk"
+    assert history.conditions[-1].part_levels is not None
+
+
 def test_neighbour_with_the_same_fault_far_weaker_is_crosstalk():
     frame = run()
     fault(frame, 1, "env_bpfo", 38.0)

@@ -155,16 +155,26 @@ def bearing_fact(bearing: int, condition: Condition) -> str:
         since = f" since {_time(c.danger_at)} (alert since {_time(c.alert_at)})"
     elif c.alert_at is not None:
         since = f" since {_time(c.alert_at)}"
+    # Two windows, said apart: the index is this snapshot, the part an hour's medians.
     text = (
-        f"Bearing {bearing}: {c.status}{since}; health index {c.index:.1f}x, driven by {c.driver}"
+        f"Bearing {bearing}: {c.status}{since}; health index right now {c.index:.1f}x, "
+        f"highest feature {c.driver}"
     )
     if c.crosstalk_from is not None:
         text += f"; it hears bearing {c.crosstalk_from}"
-        if c.diagnosis:
-            text += f", whose signal points to the {c.diagnosis}"
-    elif c.status in ("alert", "danger"):
-        text += f"; diagnosed part: {c.diagnosis or 'none'}"
-    return text + "."
+    text += "."
+    if c.part_levels is None:
+        return text
+    # Highest first, so the margin that decides the part is easy to see.
+    levels = sorted(c.part_levels.items(), key=lambda item: item[1], reverse=True)
+    if c.diagnosis is None:
+        verdict = "no part frequency stands out clearly"
+    elif c.crosstalk_from is not None:
+        verdict = f"points to the {c.diagnosis}, the fault it hears"
+    else:
+        verdict = f"points to the {c.diagnosis}"
+    listed = ", ".join(f"{part} {level:.1f}x" for part, level in levels)
+    return f"{text} Part frequencies over the last hour: {listed}; {verdict}."
 
 
 def trend_fact(bearing: int, health: HealthIndex, moment: datetime) -> str | None:

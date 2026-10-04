@@ -143,7 +143,7 @@ text = "A raised index counts as crosstalk when another bearing shows the same s
 id = "diagnosis rule"
 label = "Rule"
 source = "detector"
-text = "The diagnosed part comes from the envelope feature that stood out most over the last hour, if it reached 2x. Time-domain drivers name no part. When damage becomes widespread, every envelope feature rises and the diagnosed part becomes unreliable."
+text = "A part is named when its fault frequency's median over the last hour is at least 2x its reference and at least 2x every other part frequency. Otherwise no part is named: either none has risen, as when only time-domain features rise, or several have risen together, as when damage becomes widespread in the last stage, and the highest would be a guess."
 
 [[node]]
 id = "equal loudness"
