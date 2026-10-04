@@ -9,7 +9,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     """Runtime configuration, overridable via environment variables prefixed with MONITOR_."""
 
-    model_config = SettingsConfigDict(env_prefix="MONITOR_")
+    # .env holds local secrets such as the API key and is never committed; real environment
+    # variables win over it. Other tools' entries in it are ignored.
+    model_config = SettingsConfigDict(
+        env_prefix="MONITOR_", env_file=PROJECT_ROOT / ".env", extra="ignore"
+    )
 
     # Directory served at "/". Plain HTML today; point it at frontend/dist for a Vite build.
     frontend_dir: Path = PROJECT_ROOT / "frontend"
