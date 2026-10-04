@@ -43,7 +43,8 @@ AsOf = Annotated[
 
 
 def create_app(settings: Settings | None = None, writer: Writer | None = None) -> FastAPI:
-    """`writer` replaces the Claude call, for tests; by default it is Claude if a key is set."""
+    """`writer` replaces the model call, for tests; by default the configured model, if a key is
+    set."""
     settings = settings or Settings()
     # Loaded before serving: a missing file stops the container from starting, so a broken
     # revision never takes traffic.

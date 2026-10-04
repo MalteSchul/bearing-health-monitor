@@ -42,7 +42,7 @@ Run `just` to list all recipes.
 - `GET /api/v1/experiments/{experiment}/evaluation`: hindsight per bearing (detected, missed,
   false alarm, quiet) and the operating hours each level came before the run ended
 - `POST /api/v1/experiments/{experiment}/copilot?at=…` with `{"question": "...", "bearing": 3}`:
-  an answer from Claude, built only from cited facts (the detector at that moment and
+  the copilot's answer, built only from cited facts (the detector at that moment and
   `src/monitor/knowledge.toml`). Needs `ANTHROPIC_API_KEY` in the environment or in `.env`
   (copy `.env.example`); without it, only the facts
 - `frontend/`: static dashboard, served by the API at `/`. `?run=set2&bearing=1&at=2004-02-16T04:12:39`

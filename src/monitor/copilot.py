@@ -1,8 +1,9 @@
 """The copilot: answers a question about one run at one moment, from looked-up facts only.
 
 Retrieval-augmented generation: the facts come from the detector, for every bearing as known at
-that moment, and from the knowledge graph. Claude only phrases them and cites each one; the
-detector's status stays the verdict.
+that moment, and from the knowledge graph. The language model only phrases them and cites each
+one; the detector's status stays the verdict. Users only ever see "the copilot": the model is one
+adapter and a setting, so it can be swapped.
 """
 
 import threading
@@ -64,7 +65,7 @@ class CopilotAnswer(BaseModel):
 
 
 class Unavailable(Exception):
-    """Claude gave no usable answer. The message says why, in words for the technician."""
+    """The model gave no usable answer. The message says why, in words for the technician."""
 
 
 class UnknownBearing(LookupError):
@@ -80,7 +81,8 @@ class Writer(Protocol):
 
 
 class ClaudeWriter:
-    """One Claude call per question: no agent loop, because the facts are chosen beforehand."""
+    """The adapter for Anthropic's API, the only place that names the vendor. One call per
+    question: no agent loop, because the facts are chosen beforehand."""
 
     def __init__(self, api_key: str, model: str) -> None:
         # The dashboard waits for the answer, so fail within a minute rather than retry for long.
@@ -104,18 +106,20 @@ class ClaudeWriter:
         except anthropic.AuthenticationError as exc:
             raise Unavailable("The API key was rejected.") from exc
         except anthropic.RateLimitError as exc:
-            raise Unavailable("Claude is busy. Try again in a minute.") from exc
+            raise Unavailable("The copilot is busy. Try again in a minute.") from exc
         except anthropic.APIStatusError as exc:
-            raise Unavailable(f"Claude answered with an error ({exc.status_code}).") from exc
+            raise Unavailable(
+                f"The copilot's language model answered with an error ({exc.status_code})."
+            ) from exc
         except anthropic.APIConnectionError as exc:
-            raise Unavailable("Claude could not be reached.") from exc
+            raise Unavailable("The copilot's language model could not be reached.") from exc
         if response.stop_reason == "refusal":
-            raise Unavailable("Claude declined to answer this question.")
+            raise Unavailable("The copilot declined to answer this question.")
         if response.stop_reason == "max_tokens":
             raise Unavailable("The answer was cut off.")
         text = "".join(block.text for block in response.content if block.type == "text").strip()
         if not text:
-            raise Unavailable("Claude returned no text.")
+            raise Unavailable("The copilot returned no text.")
         return text
 
 

@@ -410,7 +410,7 @@ COPILOT = "/api/v1/experiments/set2/copilot"
 
 
 class FakeWriter:
-    """Stands in for Claude: records what it was sent and answers with a fixed text."""
+    """Stands in for the model: records what it was sent and answers with a fixed text."""
 
     def __init__(self, answer: str = "Bearing 1 is in alert [1].") -> None:
         self.answer = answer
@@ -487,14 +487,16 @@ def test_copilot_only_knows_what_was_known_at_that_time(tmp_path):
 
 
 def test_copilot_reports_why_the_writer_gave_no_answer(tmp_path):
+    reason = "The copilot's language model could not be reached."
+
     def unavailable(system: str, prompt: str) -> str:
-        raise Unavailable("Claude could not be reached.")
+        raise Unavailable(reason)
 
     client = copilot_client(tmp_path, writer=unavailable)
 
     body = client.post(COPILOT, json={"question": "Why?"}).json()
 
-    assert (body["answer"], body["note"]) == (None, "Claude could not be reached.")
+    assert (body["answer"], body["note"]) == (None, reason)
     assert body["sources"]
 
 
