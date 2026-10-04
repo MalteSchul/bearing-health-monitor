@@ -23,7 +23,10 @@ API_PREFIX = "/api"
 # offset, so one sent with "Z" or "+02:00" would be ambiguous and is rejected.
 AsOf = Annotated[
     NaiveDatetime | None,
-    Query(description="Condition as of this time, e.g. 2004-02-16T04:00. Latest if omitted."),
+    Query(
+        description="Condition as of this local rig time, without offset. Latest if omitted.",
+        examples=["2004-02-16T04:00:00"],
+    ),
 ]
 
 
