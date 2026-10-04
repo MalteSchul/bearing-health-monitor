@@ -25,15 +25,17 @@ const TIME_DOMAIN = {
 };
 const FEATURES = { ...ENVELOPE, ...TIME_DOMAIN };
 
+const HOUR_MS = 60 * 60 * 1000;
 // Drawing only: a longer step means the rig stood still, so the line must not bridge it.
-const GAP_MS = 30 * 60 * 1000;
+const GAP_MS = HOUR_MS / 2;
 // Only long stops are cut out of the axis: cutting short ones crowds the date labels together.
-const CUT_MS = 12 * 60 * 60 * 1000;
-const FINAL_PHASE_MS = 100 * 60 * 60 * 1000;
+const CUT_MS = 12 * HOUR_MS;
+const FINAL_PHASE_MS = 100 * HOUR_MS;
 
 const INK = "#1f1f1d";
 const MUTED = "#76756f";
 const GRID = "#ecebe6";
+const STOP = "#9d9b93";
 const FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 const CONFIG = {
   responsive: true,
@@ -185,16 +187,28 @@ function breakAtGaps(timestamps, series) {
 }
 
 /** Long stops of the rig, cut out of the time axis: damage only grows while it runs. */
-function stops(timestamps) {
-  const breaks = [];
+function longStops(timestamps) {
+  const stops = [];
   for (let i = 1; i < timestamps.length; i += 1) {
-    const step = millis(timestamps[i]) - millis(timestamps[i - 1]);
-    if (step >= CUT_MS) {
-      // A minute of margin on both sides keeps the line ends visible.
-      breaks.push({ values: [isoAt(millis(timestamps[i - 1]) + 60000)], dvalue: step - 120000 });
-    }
+    const ms = millis(timestamps[i]) - millis(timestamps[i - 1]);
+    if (ms >= CUT_MS) stops.push({ from: timestamps[i - 1], to: timestamps[i], ms });
   }
-  return breaks;
+  return stops;
+}
+
+const duration = (ms) =>
+  ms >= 48 * HOUR_MS ? `${(ms / (24 * HOUR_MS)).toFixed(1)} days` : `${Math.round(ms / HOUR_MS)} h`;
+
+/** What the gaps and cuts in the chart mean, for the runs that have them. */
+function stopNote(timestamps) {
+  const steps = timestamps.slice(1).map((time, i) => millis(time) - millis(timestamps[i]));
+  return (
+    (steps.some((ms) => ms > GAP_MS) ? " Gaps: the rig stood still." : "") +
+    (steps.some((ms) => ms >= CUT_MS)
+      ? " Stops of 12 h or more are cut out of the time axis and marked with a dotted line" +
+        " and //; hover the // for how long."
+      : "")
+  );
 }
 
 /** Contiguous stretches of one status, as shaded rectangles behind the health index. */
@@ -272,6 +286,7 @@ function drawChart(health, ratios, condition) {
     ...names.map((name) => ratios[name]),
   ]);
   const [index, driver, ...features] = ys;
+  const cuts = longStops(health.timestamps);
 
   // Legend entries for what is drawn as shapes: they carry no data of their own.
   const key = (name, style) => ({
@@ -300,6 +315,9 @@ function drawChart(health, ratios, condition) {
       line: { color: MUTED, width: 1, dash: "dash" },
     }),
     key("alarm raised", { mode: "lines", line: { color: STATUS.alarm.colour, width: 1.5 } }),
+    ...(cuts.length
+      ? [key("stop ≥ 12 h, cut out", { mode: "lines", line: { color: STOP, width: 1, dash: "dot" } })]
+      : []),
     ...["baseline", "crosstalk", "alarm"].map((status) =>
       key(STATUS[status].label.toLowerCase(), {
         mode: "markers",
@@ -353,6 +371,19 @@ function drawChart(health, ratios, condition) {
         line: { color: STATUS.alarm.colour, width: 1.5 },
       });
     }
+    cuts.forEach((stop) => {
+      shapes.push({
+        type: "line",
+        layer: "below",
+        xref: "x",
+        yref: `${axis} domain`,
+        x0: stop.from,
+        x1: stop.from,
+        y0: 0,
+        y1: 1,
+        line: { color: STOP, width: 1, dash: "dot" },
+      });
+    });
   });
 
   const title = { yshift: 8, font: { size: 13, color: INK, weight: 600 } };
@@ -385,6 +416,23 @@ function drawChart(health, ratios, condition) {
       font: { size: 11, color: STATUS.alarm.colour, weight: 600 },
     });
   }
+  // The usual mark for a broken axis, sitting on the axis line where the time jumps.
+  cuts.forEach((stop) => {
+    annotations.push({
+      text: "//",
+      xref: "x",
+      yref: "paper",
+      x: stop.from,
+      y: 0,
+      yanchor: "middle",
+      showarrow: false,
+      borderpad: 0,
+      bgcolor: "#ffffff",
+      font: { size: 11, color: INK, weight: 600 },
+      hovertext: `Rig stopped ${duration(stop.ms)}: ${formatTime(stop.from)} to ${formatTime(stop.to)}`,
+      hoverlabel: { bgcolor: "#ffffff", bordercolor: STOP, font: { color: INK } },
+    });
+  });
 
   const range = state.range === "final" ? finalPhase() : state.range;
   const layout = {
@@ -400,7 +448,15 @@ function drawChart(health, ratios, condition) {
     xaxis: {
       type: "date",
       anchor: "y3",
-      rangebreaks: stops(health.timestamps),
+      // A minute of margin on both sides of a cut keeps the line ends visible.
+      rangebreaks: cuts.map((stop) => ({
+        values: [isoAt(millis(stop.from) + 60000)],
+        dvalue: stop.ms - 120000,
+      })),
+      showline: true,
+      linecolor: "#c9c7be",
+      // Room below the axis line for the // marks.
+      ticklabelstandoff: 8,
       hoverformat: "%Y-%m-%d %H:%M",
       nticks: 9,
       tickangle: 0,
@@ -471,7 +527,7 @@ async function selectBearing(bearing) {
   $("detail-story").textContent =
     "Each feature divided by its median over the first 24 h, on the louder sensor; " +
     "the health index is the largest of them." +
-    (stops(health.timestamps).length ? " Stops of 12 h or more are cut out of the time axis." : "");
+    stopNote(health.timestamps);
 
   const chart = $("chart");
   await drawChart(health, ratios, summary.condition);
