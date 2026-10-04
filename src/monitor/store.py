@@ -20,7 +20,7 @@ class BearingSummary(BaseModel):
     channels: list[int]
     # Documented state at the end of the run, None if the bearing survived. For display only:
     # the detector must never see it.
-    failure: str | None
+    documented_failure: str | None
     condition: Condition
 
 
@@ -50,7 +50,7 @@ class ChannelSeries(BaseModel):
 class BearingFeatures(BaseModel):
     experiment: str
     bearing: int
-    failure: str | None
+    documented_failure: str | None
     channels: list[ChannelSeries]
 
 
@@ -119,7 +119,10 @@ def _bearing_summary(bearing: int, data: _Bearing, at: datetime | None) -> Beari
         first = data.history.conditions[0].as_of
         raise NoDataYet(f"No condition before the first snapshot at {first.isoformat()}")
     return BearingSummary(
-        bearing=bearing, channels=data.channels, failure=data.failure, condition=condition
+        bearing=bearing,
+        channels=data.channels,
+        documented_failure=data.failure,
+        condition=condition,
     )
 
 
@@ -154,7 +157,10 @@ class FeatureStore:
                 ]
                 failure = failures.get(bearing)
                 self._features[(experiment, bearing)] = BearingFeatures(
-                    experiment=experiment, bearing=bearing, failure=failure, channels=channels
+                    experiment=experiment,
+                    bearing=bearing,
+                    documented_failure=failure,
+                    channels=channels,
                 )
                 self._health[(experiment, bearing)] = _health_index(experiment, histories[bearing])
                 bearings[bearing] = _Bearing(

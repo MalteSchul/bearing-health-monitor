@@ -119,7 +119,7 @@ def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
     set2 = experiments["set2"]
     assert set2["snapshots"] == SNAPSHOTS
     assert set2["first"] == START.isoformat()
-    assert [(b["bearing"], b["channels"], b["failure"]) for b in set2["bearings"]] == [
+    assert [(b["bearing"], b["channels"], b["documented_failure"]) for b in set2["bearings"]] == [
         (1, [1], "outer race"),
         (2, [2], None),
     ]
@@ -131,7 +131,7 @@ def test_bearings_of_an_experiment(tmp_path):
 
     [bearing] = client.get("/api/v1/experiments/set1/bearings").json()
 
-    assert (bearing["bearing"], bearing["channels"], bearing["failure"]) == (
+    assert (bearing["bearing"], bearing["channels"], bearing["documented_failure"]) == (
         3,
         [5, 6],
         "inner race",
@@ -259,7 +259,11 @@ def test_bearing_features_are_columnar_and_in_time_order(tmp_path):
 
     body = client.get("/api/v1/experiments/set2/bearings/1/features").json()
 
-    assert (body["experiment"], body["bearing"], body["failure"]) == ("set2", 1, "outer race")
+    assert (body["experiment"], body["bearing"], body["documented_failure"]) == (
+        "set2",
+        1,
+        "outer race",
+    )
     [channel] = body["channels"]
     assert channel["channel"] == 1
     assert channel["timestamps"] == sorted(channel["timestamps"])
