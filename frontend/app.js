@@ -4,11 +4,15 @@
 
 const API = "/api/v1";
 
+// A colour is an action: grey wait, green nothing, amber plan the replacement, red act now.
+// Crosstalk is green because this bearing needs nothing; its band shows why the index is high.
+// band: legend name of the shading behind the health index, null for none.
 const STATUS = {
-  baseline: { label: "Learning", colour: "#8a8983", shade: "rgba(138, 137, 131, 0.22)" },
-  ok: { label: "OK", colour: "#2e9d5b", shade: null },
-  crosstalk: { label: "Crosstalk", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.2)" },
-  alarm: { label: "Alarm", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.13)" },
+  baseline: { label: "Learning", band: "learning", colour: "#8a8983", shade: "rgba(138, 137, 131, 0.22)" },
+  ok: { label: "OK", band: null, colour: "#2e9d5b", shade: null },
+  crosstalk: { label: "OK", band: "crosstalk", colour: "#2e9d5b", shade: "rgba(46, 157, 91, 0.14)" },
+  alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.2)" },
+  danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.13)" },
 };
 
 const ENVELOPE = {
@@ -130,12 +134,17 @@ async function selectRun(name, bearing = state.bearing) {
 function conditionFacts(condition) {
   const facts = [];
   if (condition.status === "baseline") facts.push("Recording its first 24 h as the reference");
-  if (condition.status === "ok") facts.push("No feature held above the alarm threshold for 1 h");
-  if (condition.crosstalk_from !== null) {
-    facts.push(`Louder on bearing ${condition.crosstalk_from}: heard, not its own`);
+  if (condition.status === "ok") facts.push("No feature held above the alert threshold for 1 h");
+  if (condition.status === "crosstalk") {
+    // Here the diagnosis is the part of the fault it hears, not one of its own.
+    const fault = condition.diagnosis === null ? "fault" : `${condition.diagnosis} fault`;
+    facts.push(`Hears bearing ${condition.crosstalk_from}'s ${fault}: no action here`);
   }
-  if (condition.alarm_at !== null) facts.push(`Alarm since ${formatTime(condition.alarm_at)}`);
-  if (condition.diagnosis !== null) {
+  if (condition.status === "alert") facts.push("<strong>Plan the replacement</strong>");
+  if (condition.status === "danger") facts.push("<strong>Act now:</strong> reduce load or stop");
+  if (condition.alert_at !== null) facts.push(`Alert raised ${formatTime(condition.alert_at)}`);
+  if (condition.danger_at !== null) facts.push(`Danger raised ${formatTime(condition.danger_at)}`);
+  if (condition.diagnosis !== null && condition.status !== "crosstalk") {
     facts.push(`Diagnosis: <strong>${condition.diagnosis}</strong>`);
   }
   return facts;
@@ -201,14 +210,17 @@ function longStops(timestamps) {
 const duration = (ms) =>
   ms >= 48 * HOUR_MS ? `${(ms / (24 * HOUR_MS)).toFixed(1)} days` : `${Math.round(ms / HOUR_MS)} h`;
 
-/** Contiguous stretches of one status, as shaded rectangles behind the health index. */
+/**
+ * Contiguous stretches of one status, as shaded rectangles behind the health index. A status
+ * holds until the next snapshot, across a stop too, as `?at=` answers; only the index line breaks
+ * there, because nothing was measured.
+ */
 function statusShapes(timestamps, status) {
   const shapes = [];
   let first = 0;
   for (let i = 1; i <= status.length; i += 1) {
     const end = i === status.length;
-    const gap = !end && millis(timestamps[i]) - millis(timestamps[i - 1]) > GAP_MS;
-    if (end || gap || status[i] !== status[first]) {
+    if (end || status[i] !== status[first]) {
       if (STATUS[status[first]].shade !== null) {
         shapes.push({
           type: "rect",
@@ -216,7 +228,7 @@ function statusShapes(timestamps, status) {
           xref: "x",
           yref: "y domain",
           x0: timestamps[first],
-          x1: end || gap ? timestamps[i - 1] : timestamps[i],
+          x1: timestamps[end ? i - 1 : i],
           y0: 0,
           y1: 1,
           fillcolor: STATUS[status[first]].shade,
@@ -268,6 +280,19 @@ function finalPhase() {
   return [isoAt(millis(state.last) - FINAL_PHASE_MS), state.last];
 }
 
+/** When the bearing was raised to alert and to danger, as one mark if both came at once. */
+function escalations(condition) {
+  if (condition.alert_at === null) return [];
+  if (condition.danger_at === condition.alert_at) {
+    return [{ at: condition.danger_at, text: "alert and danger", colour: STATUS.danger.colour }];
+  }
+  const marks = [{ at: condition.alert_at, text: "alert", colour: STATUS.alert.colour }];
+  if (condition.danger_at !== null) {
+    marks.push({ at: condition.danger_at, text: "danger", colour: STATUS.danger.colour });
+  }
+  return marks;
+}
+
 function drawChart(health, ratios, condition) {
   const names = Object.keys(FEATURES);
   const { x, ys } = breakAtGaps(health.timestamps, [
@@ -277,6 +302,7 @@ function drawChart(health, ratios, condition) {
   ]);
   const [index, driver, ...features] = ys;
   const cuts = longStops(health.timestamps);
+  const marks = escalations(condition);
 
   // Legend entries for what is drawn as shapes: they carry no data of their own.
   const key = (name, style) => ({
@@ -304,23 +330,26 @@ function drawChart(health, ratios, condition) {
       mode: "lines",
       line: { color: MUTED, width: 1, dash: "dash" },
     }),
-    key("alarm raised", { mode: "lines", line: { color: STATUS.alarm.colour, width: 1.5 } }),
+    key("alert raised", { mode: "lines", line: { color: STATUS.alert.colour, width: 1.5 } }),
+    key("danger raised", { mode: "lines", line: { color: STATUS.danger.colour, width: 1.5 } }),
     ...(cuts.length
       ? [key("stop ≥ 12 h, cut out", { mode: "lines", line: { color: STOP, width: 1, dash: "dot" } })]
       : []),
-    ...["baseline", "crosstalk", "alarm"].map((status) =>
-      key(STATUS[status].label.toLowerCase(), {
-        mode: "markers",
-        legendgroup: "status",
-        legendgrouptitle: { text: "Status", font: { color: MUTED } },
-        marker: {
-          symbol: "square",
-          size: 14,
-          color: STATUS[status].shade,
-          line: { color: STATUS[status].colour, width: 1 },
-        },
-      }),
-    ),
+    ...Object.values(STATUS)
+      .filter((status) => status.band !== null)
+      .map((status) =>
+        key(status.band, {
+          mode: "markers",
+          legendgroup: "status",
+          legendgrouptitle: { text: "Status", font: { color: MUTED } },
+          marker: {
+            symbol: "square",
+            size: 14,
+            color: status.shade,
+            line: { color: status.colour, width: 1 },
+          },
+        }),
+      ),
     ...names.map((name, k) => {
       const envelope = name in ENVELOPE;
       return {
@@ -349,18 +378,18 @@ function drawChart(health, ratios, condition) {
       y1: health.threshold,
       line: { color: MUTED, width: 1, dash: "dash" },
     });
-    if (condition.alarm_at !== null) {
+    marks.forEach((mark) => {
       shapes.push({
         type: "line",
         xref: "x",
         yref: `${axis} domain`,
-        x0: condition.alarm_at,
-        x1: condition.alarm_at,
+        x0: mark.at,
+        x1: mark.at,
         y0: 0,
         y1: 1,
-        line: { color: STATUS.alarm.colour, width: 1.5 },
+        line: { color: mark.colour, width: 1.5 },
       });
-    }
+    });
     cuts.forEach((stop) => {
       shapes.push({
         type: "line",
@@ -379,33 +408,44 @@ function drawChart(health, ratios, condition) {
   const title = { yshift: 8, font: { size: 13, color: INK, weight: 600 } };
   const annotations = [
     note(
-      `Health index and status · alarm after ${health.threshold}× for 1 h on own evidence`,
+      `Health index and status · alert: ${health.threshold}× for 1 h on own evidence · ` +
+        `danger: rms ${health.threshold}× as well`,
       0,
       DOMAINS[0][1],
       title,
     ),
     note("Envelope features · one per bearing part", 0, DOMAINS[1][1], title),
-    note("Time-domain features · overall level and impulsiveness", 0, DOMAINS[2][1], title),
+    note(
+      "Time-domain features · overall level and impulsiveness · rms decides danger",
+      0,
+      DOMAINS[2][1],
+      title,
+    ),
     note("Click a name to hide its line,<br>double-click to show only that one.", 1.02, 0, {
       font: { size: 11, color: MUTED },
     }),
   ];
-  if (condition.alarm_at !== null) {
+  const middle = millis(health.timestamps[Math.floor(health.timestamps.length / 2)]);
+  marks.forEach((mark, k) => {
+    // Towards the middle of the run: Plotly centres an "auto" label on its line and stretches the
+    // time axis past the data to fit one that sticks out at the end.
+    const late = millis(mark.at) > middle;
     annotations.push({
-      text: `alarm ${formatTime(condition.alarm_at)}`,
+      text: `${mark.text} ${formatTime(mark.at)}`,
       xref: "x",
       yref: "y domain",
-      x: condition.alarm_at,
-      y: 1,
-      // Left of the line near the right edge, right of it near the left edge.
-      xanchor: "auto",
+      x: mark.at,
+      // One below the other: alert and danger can be close together on a long run.
+      y: 1 - 0.12 * k,
+      xanchor: late ? "right" : "left",
+      xshift: late ? -3 : 3,
       yanchor: "top",
       showarrow: false,
       borderpad: 3,
       bgcolor: "rgba(255, 255, 255, 0.85)",
-      font: { size: 11, color: STATUS.alarm.colour, weight: 600 },
+      font: { size: 11, color: mark.colour, weight: 600 },
     });
-  }
+  });
   // The usual mark for a broken axis, sitting on the axis line where the time jumps.
   cuts.forEach((stop) => {
     annotations.push({

@@ -134,37 +134,37 @@ def test_healthy_run_stays_ok():
     assert [c.status for c in latest(run()).values()] == ["ok", "ok"]
 
 
-def test_failing_bearing_alarms_with_its_part():
+def test_failing_bearing_alerts_with_its_part():
     frame = run()
     fault(frame, 1, "env_bpfo", 38.0)
 
     condition = latest(frame)[1]
 
     assert (condition.status, condition.driver, condition.diagnosis) == (
-        "alarm",
+        "alert",
         "env_bpfo",
         "outer race",
     )
-    assert condition.alarm_at == hour(49)
+    assert condition.alert_at == hour(49)
 
 
-def test_alarm_latches_although_the_index_drops_again():
+def test_alert_latches_although_the_index_drops_again():
     frame = run()
     fault(frame, 1, "env_bpfo", 38.0)
     frame.loc[between(frame, 50), "env_bpfo"] = 1.0
 
     condition = latest(frame)[1]
 
-    assert (condition.status, condition.index, condition.alarm_at) == ("alarm", 1.0, hour(49))
+    assert (condition.status, condition.index, condition.alert_at) == ("alert", 1.0, hour(49))
 
 
-def test_time_domain_fault_alarms_without_naming_a_part():
+def test_time_domain_fault_alerts_without_naming_a_part():
     frame = run()
     fault(frame, 1, "kurtosis", 5.0)
 
     condition = latest(frame)[1]
 
-    assert (condition.status, condition.driver, condition.diagnosis) == ("alarm", "kurtosis", None)
+    assert (condition.status, condition.driver, condition.diagnosis) == ("alert", "kurtosis", None)
 
 
 def test_neighbour_with_the_same_fault_far_weaker_is_crosstalk():
@@ -174,8 +174,8 @@ def test_neighbour_with_the_same_fault_far_weaker_is_crosstalk():
 
     result = latest(frame)
 
-    assert result[1].status == "alarm"
-    assert (result[2].status, result[2].crosstalk_from, result[2].alarm_at) == (
+    assert result[1].status == "alert"
+    assert (result[2].status, result[2].crosstalk_from, result[2].alert_at) == (
         "crosstalk",
         1,
         None,
@@ -184,26 +184,26 @@ def test_neighbour_with_the_same_fault_far_weaker_is_crosstalk():
     assert result[2].diagnosis == "outer race"
 
 
-def test_neighbour_with_a_comparable_fault_alarms_too():
+def test_neighbour_with_a_comparable_fault_alerts_too():
     frame = run()
     fault(frame, 1, "env_bpfo", 38.0)
     fault(frame, 2, "env_bpfo", 20.0)
 
-    assert [c.status for c in latest(frame).values()] == ["alarm", "alarm"]
+    assert [c.status for c in latest(frame).values()] == ["alert", "alert"]
 
 
-def test_different_faults_on_neighbours_both_alarm():
+def test_different_faults_on_neighbours_both_alert():
     frame = run()
     fault(frame, 1, "env_bpfi", 38.0)
     fault(frame, 2, "env_bsf", 5.0)
 
     result = latest(frame)
 
-    assert (result[1].status, result[1].diagnosis) == ("alarm", PARTS["env_bpfi"])
-    assert (result[2].status, result[2].diagnosis) == ("alarm", PARTS["env_bsf"])
+    assert (result[1].status, result[1].diagnosis) == ("alert", PARTS["env_bpfi"])
+    assert (result[2].status, result[2].diagnosis) == ("alert", PARTS["env_bsf"])
 
 
-def test_crosstalk_turns_into_an_alarm_once_the_bearing_has_a_fault_of_its_own():
+def test_crosstalk_turns_into_an_alert_once_the_bearing_has_a_fault_of_its_own():
     frame = run()
     fault(frame, 1, "env_bpfo", 38.0)
     fault(frame, 2, "env_bpfo", 5.0)
@@ -213,18 +213,67 @@ def test_crosstalk_turns_into_an_alarm_once_the_bearing_has_a_fault_of_its_own()
 
     assert history.at(hour(59)).status == "crosstalk"
     condition = history.conditions[-1]
-    assert (condition.status, condition.diagnosis) == ("alarm", "roller element")
+    assert (condition.status, condition.diagnosis) == ("alert", "roller element")
     # Its own fault needs half an hour to dominate the medians, then a full hour to hold.
-    assert hour(61) < condition.alarm_at < hour(62)
+    assert hour(61) < condition.alert_at < hour(62)
 
 
-def test_one_hour_where_the_source_looks_less_dominant_does_not_latch_an_alarm():
+def test_one_hour_where_the_source_looks_less_dominant_does_not_latch_an_alert():
     frame = run()
     fault(frame, 1, "env_bpfo", 38.0)
     fault(frame, 2, "env_bpfo", 5.0)
     frame.loc[between(frame, 60, 60.1) & (frame["bearing"] == 2), "env_bpfo"] = 30.0
 
     assert latest(frame)[2].status == "crosstalk"
+
+
+def test_alert_turns_into_danger_once_the_energy_holds_above_threshold():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+    fault(frame, 1, "rms", 3.0, start=55)
+
+    history = assess(frame)[0]
+
+    assert history.at(hour(55.5)).status == "alert"
+    condition = history.conditions[-1]
+    assert (condition.status, condition.alert_at, condition.danger_at) == (
+        "danger",
+        hour(49),
+        hour(56),
+    )
+    assert condition.diagnosis == "outer race"
+
+
+def test_energy_rising_first_raises_alert_and_danger_at_once_without_a_part():
+    frame = run()
+    fault(frame, 1, "rms", 3.0)
+
+    condition = latest(frame)[1]
+
+    assert (condition.status, condition.diagnosis) == ("danger", None)
+    assert condition.alert_at == condition.danger_at == hour(49)
+
+
+def test_danger_latches_although_the_energy_drops_again():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+    fault(frame, 1, "rms", 3.0, start=50)
+    frame.loc[between(frame, 52) & (frame["bearing"] == 1), "rms"] = 1.0
+
+    condition = latest(frame)[1]
+
+    assert (condition.status, condition.danger_at) == ("danger", hour(51))
+
+
+def test_crosstalk_never_turns_into_danger_although_its_energy_rises():
+    frame = run()
+    fault(frame, 1, "env_bpfo", 38.0)
+    fault(frame, 2, "env_bpfo", 5.0)
+    fault(frame, 2, "rms", 3.0)
+
+    condition = latest(frame)[2]
+
+    assert (condition.status, condition.alert_at, condition.danger_at) == ("crosstalk", None, None)
 
 
 def test_history_answers_as_of_any_time():
@@ -246,10 +295,12 @@ def test_every_condition_depends_only_on_the_data_up_to_it():
     growth = ((frame["timestamp"] - hour(26)) / pd.Timedelta(hours=1)).clip(lower=0)
     frame.loc[frame["bearing"] == 1, "env_bpfo"] += 1.5 * growth
     frame.loc[frame["bearing"] == 2, "env_bpfo"] += 0.25 * growth
+    frame.loc[frame["bearing"] == 1, "rms"] += 0.5 * (growth - 6).clip(lower=0)
 
     full: dict[int, History] = {h.bearing: h for h in assess(frame)}
     statuses = {c.status for h in full.values() for c in h.conditions}
-    assert statuses == {"baseline", "ok", "crosstalk", "alarm"}, "scenario must cover all states"
+    all_states = {"baseline", "ok", "crosstalk", "alert", "danger"}
+    assert statuses == all_states, "scenario must cover all states"
 
     for cut in frame["timestamp"].drop_duplicates()[::6]:
         for history in assess(frame[frame["timestamp"] <= cut]):

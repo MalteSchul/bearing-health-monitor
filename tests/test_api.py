@@ -10,11 +10,11 @@ from monitor.config import Settings
 from monitor.features import FEATURES, ChannelFeatures
 from monitor.store import ChannelSeries
 
-# 30 hours of 10-minute snapshots: the first 24 are the baseline, the rest can raise an alarm.
+# 30 hours of 10-minute snapshots: the first 24 are the baseline, the rest can raise an alert.
 SNAPSHOTS = 180
 START = datetime(2004, 2, 12, 10, 0)
 FAULT_FROM = START + timedelta(hours=26)
-ALARM_AT = FAULT_FROM + timedelta(hours=1)
+ALERT_AT = FAULT_FROM + timedelta(hours=1)
 
 
 def feature_rows(experiment: str, bearing: int, channel: int) -> list[dict[str, object]]:
@@ -146,14 +146,15 @@ def test_bearings_report_their_latest_condition(tmp_path):
     last = (START + timedelta(minutes=10 * (SNAPSHOTS - 1))).isoformat()
     assert failing["condition"] == {
         "as_of": last,
-        "status": "alarm",
+        "status": "alert",
         "index": pytest.approx(10, rel=0.1),
         "driver": "env_bpfo",
         "diagnosis": "outer race",
-        "alarm_at": ALARM_AT.isoformat(),
+        "alert_at": ALERT_AT.isoformat(),
+        "danger_at": None,
         "crosstalk_from": None,
     }
-    assert (healthy["condition"]["status"], healthy["condition"]["alarm_at"]) == ("ok", None)
+    assert (healthy["condition"]["status"], healthy["condition"]["alert_at"]) == ("ok", None)
 
 
 def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
@@ -166,10 +167,10 @@ def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
         zip(body["timestamps"], body["index"], body["driver"], body["status"], strict=True)
     )
     assert len(series) == SNAPSHOTS
-    # No index while the baseline is recorded, then the alarm from the moment it was raised.
+    # No index while the baseline is recorded, then the alert from the moment it was raised.
     assert series[0] == (START.isoformat(), None, None, "baseline")
     assert {status for _, _, _, status in series[:144]} == {"baseline"}
-    assert [t for t, _, _, status in series if status == "alarm"][0] == ALARM_AT.isoformat()
+    assert [t for t, _, _, status in series if status == "alert"][0] == ALERT_AT.isoformat()
 
 
 def test_health_index_is_the_largest_ratio_at_each_snapshot(tmp_path):
@@ -210,12 +211,12 @@ def test_condition_as_of_a_time_shows_what_was_known_then(tmp_path):
 
     learning = condition_at(client, path, START + timedelta(hours=12))
     rising = condition_at(client, path, FAULT_FROM + timedelta(minutes=30))
-    raised = condition_at(client, path, ALARM_AT + timedelta(minutes=5))
+    raised = condition_at(client, path, ALERT_AT + timedelta(minutes=5))
 
     assert (learning["status"], learning["index"]) == ("baseline", None)
-    assert (rising["status"], rising["alarm_at"]) == ("ok", None)
+    assert (rising["status"], rising["alert_at"]) == ("ok", None)
     # Between snapshots the answer comes from the latest one before.
-    assert (raised["status"], raised["as_of"]) == ("alarm", ALARM_AT.isoformat())
+    assert (raised["status"], raised["as_of"]) == ("alert", ALERT_AT.isoformat())
 
 
 def test_at_applies_to_the_experiment_and_its_bearings_list(tmp_path):

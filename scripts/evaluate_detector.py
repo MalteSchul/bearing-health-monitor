@@ -3,7 +3,8 @@
     uv run python scripts/evaluate_detector.py
 
 Reads the feature table the app serves. Thresholds were chosen on set 2 only; sets 1 and 3 are
-evaluated unchanged, so their numbers are the honest ones. The same detector is also run on
+evaluated unchanged, so their numbers are the honest ones. The danger level came after all runs
+had been seen; it adds no new number, but it is not held out. The same detector is also run on
 feature subsets: rms alone is the usual overall-level alarm, the others show what each domain adds.
 """
 
@@ -49,23 +50,25 @@ def evaluate(
     history: History, start: datetime, times: pd.Series, failure: str | None
 ) -> dict[str, object]:
     end = history.conditions[-1]
-    alarm = end.alarm_at
-    at_alarm = None if alarm is None else history.at(alarm)
+    alert, danger = end.alert_at, end.danger_at
+    at_alert = None if alert is None else history.at(alert)
     crosstalk = next((c.as_of for c in history.conditions if c.status == "crosstalk"), None)
     if failure is None:
-        verdict = "false alarm" if alarm else "ok"
+        verdict = "false alarm" if alert else "ok"
     else:
-        verdict = "detected" if alarm else "missed"
+        verdict = "detected" if alert else "missed"
     return {
         "bearing": history.bearing,
         "failure": failure or "-",
         "status": end.status,
-        "alarm_h": hours(start, alarm),
+        "alert_h": hours(start, alert),
+        "danger_h": hours(start, danger),
         "end_h": hours(start, end.as_of),
-        "warning_h": hours(alarm, end.as_of) if alarm else None,
+        "warning_h": hours(alert, end.as_of) if alert else None,
         # The rig stood still for days in set 1; damage only grows while it runs.
-        "warning_op_h": operating_hours(times, alarm, end.as_of) if alarm else None,
-        "diagnosis_at_alarm": at_alarm.diagnosis if at_alarm else None,
+        "warning_op_h": operating_hours(times, alert, end.as_of) if alert else None,
+        "danger_op_h": operating_hours(times, danger, end.as_of) if danger else None,
+        "diagnosis_at_alert": at_alert.diagnosis if at_alert else None,
         "diagnosis_at_end": end.diagnosis,
         "first_crosstalk_h": hours(start, crosstalk),
         "verdict": verdict,
@@ -112,20 +115,23 @@ def rate(hits: int, total: int) -> str:
     return f"{hits}/{total} (95% CI {low:.0%}-{high:.0%})"
 
 
-def summary(table: pd.DataFrame) -> dict[str, object]:
+def summary(table: pd.DataFrame, warning: str = "warning_op_h") -> dict[str, object]:
+    """Detections and false alarms of one level, read from the column with its warning time."""
     failed = table[table["failure"] != "-"]
     survivors = table[table["failure"] == "-"]
-    detected = failed[failed["verdict"] == "detected"]
-    false_alarms = int((survivors["verdict"] == "false alarm").sum())
+    detected = failed[warning].dropna()
+    false_alarms = int(survivors[warning].notna().sum())
     return {
         "detected": rate(len(detected), len(failed)),
-        "median warning": round(float(detected["warning_op_h"].median()), 1),
+        "median warning": round(float(detected.median()), 1),
         "false alarms": rate(false_alarms, len(survivors)),
         "per 1000 h": round(false_alarms / survivors["monitored_op_h"].sum() * 1000, 2),
-        "right part": rate(
-            int((failed["diagnosis_at_end"] == failed["failure"]).sum()), len(failed)
-        ),
     }
+
+
+def right_part(table: pd.DataFrame) -> str:
+    failed = table[table["failure"] != "-"]
+    return rate(int((failed["diagnosis_at_end"] == failed["failure"]).sum()), len(failed))
 
 
 def main() -> None:
@@ -153,12 +159,21 @@ def main() -> None:
             row[name] = "missed" if pd.isna(value) else float(value)
     print_table(rows)
 
-    print("\nSummary per feature set (same alarm rule, same thresholds):\n")
-    print_table([{"feature set": name, **summary(table)} for name, table in tables.items()])
+    print("\nSummary per feature set (same alert rule, same thresholds):\n")
+    print_table(
+        [
+            {"feature set": name, **summary(table), "right part": right_part(table)}
+            for name, table in tables.items()
+        ]
+    )
+
+    print("\nAlert and danger, all 8 features (danger: rms held at the threshold, too):\n")
+    levels = {"alert": "warning_op_h", "danger": "danger_op_h"}
+    print_table([{"level": level, **summary(detector, column)} for level, column in levels.items()])
     print(
-        "\nmedian warning: operating hours, detected failures only.  per 1000 h: false alarms per"
-        "\n1000 operating hours of surviving bearings.  right part: diagnosis at the end matches"
-        " the readme."
+        "\nmedian warning: operating hours from the level to the end, detected failures only."
+        "\nper 1000 h: false alarms per 1000 operating hours of surviving bearings."
+        "\nright part: diagnosis at the end matches the readme."
     )
 
 

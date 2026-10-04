@@ -35,7 +35,7 @@ Run `just` to list all recipes.
   Add `?at=2004-02-16T04:00` to get the condition as it was known at that time
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
-  per snapshot
+  per snapshot: `baseline`, `ok`, `crosstalk`, `alert` (plan the replacement), `danger` (act now)
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/ratios`: each feature relative to its
   baseline, what the detector compares (the health index is the largest)
 - `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
