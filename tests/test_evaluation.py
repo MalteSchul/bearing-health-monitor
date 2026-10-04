@@ -45,7 +45,7 @@ def test_operating_hours_leave_out_stops():
     [
         (True, "outer race", "detected"),
         (False, "outer race", "missed"),
-        (True, None, "false alert"),
+        (True, None, "false alarm"),
         (False, None, "quiet"),
     ],
 )
@@ -79,5 +79,5 @@ def test_run_totals_count_failures_and_survivors_separately():
 
     run = evaluate_run("set1", histories, snapshots(30), {1: "outer race", 2: "inner race"})
 
-    assert [r.verdict for r in run.bearings] == ["detected", "missed", "false alert", "quiet"]
-    assert (run.failures, run.failures_alerted, run.survivors, run.false_alerts) == (2, 1, 2, 1)
+    assert [r.verdict for r in run.bearings] == ["detected", "missed", "false alarm", "quiet"]
+    assert (run.failures, run.failures_alerted, run.survivors, run.false_alarms) == (2, 1, 2, 1)

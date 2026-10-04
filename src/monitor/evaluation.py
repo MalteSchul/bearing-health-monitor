@@ -13,7 +13,7 @@ import pandas as pd
 
 from monitor.health import MAX_GAP, History
 
-Verdict = Literal["detected", "missed", "false alert", "quiet"]
+Verdict = Literal["detected", "missed", "false alarm", "quiet"]
 
 
 def operating_hours(times: pd.Series, start: datetime, end: datetime) -> float:
@@ -25,7 +25,7 @@ def operating_hours(times: pd.Series, start: datetime, end: datetime) -> float:
 
 def verdict(alerted: bool, failure: str | None) -> Verdict:
     if failure is None:
-        return "false alert" if alerted else "quiet"
+        return "false alarm" if alerted else "quiet"
     return "detected" if alerted else "missed"
 
 
@@ -47,7 +47,7 @@ class RunEvaluation:
     failures: int
     failures_alerted: int
     survivors: int
-    false_alerts: int
+    false_alarms: int
 
 
 def judge(history: History, times: pd.Series, failure: str | None) -> BearingResult:
@@ -78,5 +78,5 @@ def evaluate_run(
         failures=len(failed),
         failures_alerted=sum(r.verdict == "detected" for r in failed),
         survivors=len(survived),
-        false_alerts=sum(r.verdict == "false alert" for r in survived),
+        false_alarms=sum(r.verdict == "false alarm" for r in survived),
     )

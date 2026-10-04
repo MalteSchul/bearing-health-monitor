@@ -215,7 +215,7 @@ function renderResult() {
   const ahead = leadHours.length ? ` (${listed(leadHours)} op-h before the run ended)` : "";
   $("run-result").textContent =
     `Hindsight · documented failures alerted: ${run.failures_alerted} of ${run.failures}${ahead}` +
-    ` · survivors alerted falsely: ${run.false_alerts} of ${run.survivors}`;
+    ` · false alarms on survivors: ${run.false_alarms} of ${run.survivors}`;
 }
 
 // --- bearing cards ----------------------------------------------------------------------------

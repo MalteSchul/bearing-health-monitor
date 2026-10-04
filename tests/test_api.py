@@ -368,7 +368,7 @@ def test_evaluation_compares_each_alert_with_the_documented_end(tmp_path):
         "failures": 1,
         "failures_alerted": 1,
         "survivors": 1,
-        "false_alerts": 0,
+        "false_alarms": 0,
     }
 
 
