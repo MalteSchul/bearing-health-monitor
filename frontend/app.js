@@ -16,8 +16,11 @@ const STATUS = {
   alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.28)" },
   danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.32)" },
 };
-// What the number on a card means, shown on hovering its label.
-const INDEX_MEANING = "The bearing's largest vibration feature, relative to its own first 24 h";
+// What the number on a card means, shown on hovering its label. Worded as the copilot's facts on
+// the health index and baseline rules in knowledge.toml.
+const INDEX_MEANING =
+  "The largest of the bearing's 8 feature ratios: each feature divided by its median over the " +
+  "bearing's first 24 h. 1× means as on its first day.";
 // The alarms, with what each asks of the operator.
 const ACTIONS = { alert: "Plan the replacement", danger: "Reduce load or stop" };
 
