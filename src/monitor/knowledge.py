@@ -69,15 +69,18 @@ class Knowledge:
     def machine(self) -> list[Fact]:
         return [self.fact(n) for n, label in self._graph.nodes(data="label") if label == MACHINE]
 
-    def around(self, starts: Iterable[str]) -> list[Fact]:
-        """Each start and what its arrows reach within HOPS, nearest first, without repeats.
+    def around(self, starts: Iterable[str]) -> list[tuple[Fact, list[str]]]:
+        """Each start and what its arrows reach within HOPS, nearest first, without repeats, each
+        with the starts that reached it: why it was looked up, which a bare fact cannot say.
 
         Arrows are only followed forwards, from what the detector reports towards what explains it.
-        In Cypher: MATCH (s {id: $start})-[*0..2]->(n) RETURN n.
+        In Cypher: MATCH (s {id: $start})-[*0..2]->(n) RETURN n, collect(s.id).
         """
-        seen: dict[str, None] = {}
+        reached_from: dict[str, list[str]] = {}
         for start in starts:
             # Breadth-first, so the dict comes back ordered by distance.
-            reached = nx.single_source_shortest_path_length(self._graph, start, cutoff=HOPS)
-            seen.update(dict.fromkeys(reached))
-        return [self.fact(n) for n in seen]
+            for node in nx.single_source_shortest_path_length(self._graph, start, cutoff=HOPS):
+                origins = reached_from.setdefault(node, [])
+                if start not in origins:
+                    origins.append(start)
+        return [(self.fact(n), origins) for n, origins in reached_from.items()]

@@ -437,7 +437,7 @@ def test_copilot_without_a_key_returns_the_facts_but_no_answer(tmp_path):
     assert (first["id"], first["kind"]) == (1, "detector")
     assert first["text"].startswith(f"Bearing 1: alert since {ALERT_AT:%Y-%m-%d %H:%M}")
     texts = [s["text"] for s in body["sources"]]
-    assert any(t.startswith("Alert (yellow)") for t in texts), "status explained from the graph"
+    assert "For bearing 1 (alert): Alert (yellow)" in " ".join(texts), "explained, and for whom"
     assert any("2,000 rpm" in t for t in texts), "machine facts always included"
 
 
@@ -460,7 +460,20 @@ def test_copilot_answers_about_the_whole_run_without_a_bearing(tmp_path):
     body = client.post(COPILOT, json={"question": "Which bearing is the problem?"}).json()
 
     detector = [s["text"] for s in body["sources"] if s["kind"] == "detector"]
-    assert [t.split(":")[0] for t in detector[:2]] == ["Bearing 1", "Bearing 2"]
+    # Each bearing's status, then its trend.
+    assert [t.split(":")[0] for t in detector[:3]] == [
+        "Bearing 1",
+        "Bearing 1 health index",
+        "Bearing 2",
+    ]
+
+
+def test_copilot_lists_bearings_in_rig_order_whichever_is_in_focus(tmp_path):
+    client = copilot_client(tmp_path)
+
+    body = client.post(COPILOT, json={"question": "Status?", "bearing": 2}).json()
+
+    assert body["sources"][0]["text"].startswith("Bearing 1:")
 
 
 def test_copilot_only_knows_what_was_known_at_that_time(tmp_path):

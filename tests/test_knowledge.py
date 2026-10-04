@@ -41,7 +41,7 @@ def test_machine_facts_carry_their_full_source():
 
 
 def test_part_leads_to_its_damage_types_and_their_causes():
-    ids = [f.id for f in KNOWLEDGE.around(["outer race"])]
+    ids = [f.id for f, _ in KNOWLEDGE.around(["outer race"])]
 
     assert ids[0] == "outer race"
     assert {"subsurface fatigue", "surface fatigue", "indentation"} <= set(ids)
@@ -50,7 +50,7 @@ def test_part_leads_to_its_damage_types_and_their_causes():
 
 def test_lookup_stops_after_two_hops():
     # env_bpfo -> outer race -> damage types; their causes would be a third hop.
-    ids = {f.id for f in KNOWLEDGE.around(["env_bpfo"])}
+    ids = {f.id for f, _ in KNOWLEDGE.around(["env_bpfo"])}
 
     assert {"outer race", "subsurface fatigue"} <= ids
     assert "end of life" not in ids
@@ -58,21 +58,28 @@ def test_lookup_stops_after_two_hops():
 
 def test_arrows_are_only_followed_forwards():
     # Causes explain damage; they lead nowhere, so a cause alone reaches only itself.
-    assert [f.id for f in KNOWLEDGE.around(["contamination"])] == ["contamination"]
+    assert [f.id for f, _ in KNOWLEDGE.around(["contamination"])] == ["contamination"]
 
 
 def test_status_leads_to_its_rules_and_actions():
-    ids = [f.id for f in KNOWLEDGE.around(["danger"])]
+    ids = [f.id for f, _ in KNOWLEDGE.around(["danger"])]
 
     assert {"danger rule", "act now", "check for secondary damage"} <= set(ids)
     assert "plan the replacement" not in ids
 
 
 def test_overlapping_lookups_list_each_fact_once_nearest_first():
-    ids = [f.id for f in KNOWLEDGE.around(["alert", "danger"])]
+    ids = [f.id for f, _ in KNOWLEDGE.around(["alert", "danger"])]
 
     assert len(ids) == len(set(ids))
     assert ids[0] == "alert"
+
+
+def test_each_fact_says_which_starts_reached_it():
+    reached = {f.id: origins for f, origins in KNOWLEDGE.around(["alert", "danger"])}
+
+    assert reached["act now"] == ["danger"]
+    assert reached["inspect every bearing"] == ["alert", "danger"]
 
 
 def test_unknown_source_stops_loading(tmp_path):

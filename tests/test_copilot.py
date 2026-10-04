@@ -13,6 +13,7 @@ from monitor.copilot import (
     bearing_fact,
     lookup_starts,
     prompt,
+    reached_by,
     trend_fact,
 )
 from monitor.health import Condition
@@ -124,22 +125,40 @@ def test_no_trend_while_the_bearing_learns():
     assert trend_fact(3, health([None, None]), T) is None
 
 
-def test_lookup_starts_from_every_status_and_the_flagged_bearings_details():
+def test_lookup_starts_from_every_status_and_the_flagged_bearings_details_in_rig_order():
     conditions = {
+        3: condition("danger", driver="env_bpfo", diagnosis="outer race"),
         1: condition("ok"),
         2: condition("crosstalk", driver="env_bpfo", diagnosis="outer race"),
-        3: condition("danger", driver="env_bpfo", diagnosis="outer race"),
+        4: condition("danger", driver="env_bsf"),
     }
 
     starts = lookup_starts(conditions, focus=3)
 
-    assert starts[:3] == ["danger", "outer race", "env_bpfo"]
-    assert "rms" not in starts, "a healthy bearing's driver is noise"
-    assert {"ok", "crosstalk"} <= set(starts)
+    assert starts == {
+        "ok": [1],
+        "crosstalk": [2],
+        "outer race": [2, 3],
+        "env_bpfo": [2, 3],
+        "danger": [3, 4],
+        "env_bsf": [4],
+    }, "a healthy bearing's driver is noise"
 
 
 def test_bearing_in_focus_is_explained_even_when_healthy():
-    assert lookup_starts({1: condition("ok", driver="kurtosis")}, focus=1) == ["ok", "kurtosis"]
+    assert lookup_starts({1: condition("ok", driver="kurtosis")}, focus=1) == {
+        "ok": [1],
+        "kurtosis": [1],
+    }
+
+
+def test_general_fact_names_every_bearing_whose_word_led_to_it():
+    starts = {"alert": [2], "danger": [3, 4], "env_bsf": [3]}
+
+    assert reached_by(starts, ["danger"]) == "For bearing 3 (danger), bearing 4 (danger)"
+    assert reached_by(starts, ["alert", "danger", "env_bsf"]) == (
+        "For bearing 2 (alert), bearing 3 (danger, env_bsf), bearing 4 (danger)"
+    )
 
 
 def test_prompt_tags_the_question_and_numbers_the_facts():

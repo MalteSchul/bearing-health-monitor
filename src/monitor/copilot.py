@@ -33,12 +33,14 @@ You are the copilot of a vibration monitor for rolling bearings. A service techn
 one test rig at one moment.
 
 Answer only from the numbered facts in the message. After each sentence, cite the facts it rests \
-on, like [2] or [1][4]. The detector's status is the verdict: explain it, never overrule it. Quote \
-numbers exactly as the facts give them and never estimate new ones, such as a remaining life. If \
-the facts do not answer the question, say so in one sentence and name what is missing.
+on, like [2] or [1][4]. The detector's status is the verdict: explain it, never overrule it. A \
+general fact that starts with "For bearing ..." applies to each bearing it names. Quote numbers \
+exactly as the facts give them and never estimate new ones, such as a remaining life. If the facts \
+do not answer the question, say so in one sentence and name what is missing.
 
-Answer in the language of the question, in at most 120 words of plain text, without headings or \
-lists."""
+Answer the question in the first sentence, then add only what the technician needs to act on it. \
+Answer in the language of the question, as short as the question allows and in at most 80 words \
+of plain text, without headings or lists."""
 
 
 class Question(BaseModel):
@@ -192,17 +194,29 @@ def trend_fact(bearing: int, health: HealthIndex, moment: datetime) -> str | Non
     return f"Bearing {bearing} health index: {', '.join(points)}, now {now:.1f}x."
 
 
-def lookup_starts(conditions: Mapping[int, Condition], focus: int | None) -> list[str]:
-    """Where the knowledge lookup starts: every status shown, plus the part and driver of each
-    flagged bearing and of the one in focus. The detector's words are the graph's node ids."""
-    order = ([focus] if focus is not None else []) + [b for b in conditions if b != focus]
-    starts: list[str] = []
-    for bearing in order:
+def lookup_starts(conditions: Mapping[int, Condition], focus: int | None) -> dict[str, list[int]]:
+    """Where the knowledge lookup starts, and for which bearings: every status shown, plus the part
+    and driver of each flagged bearing and of the one in focus. The detector's words are the
+    graph's node ids."""
+    starts: dict[str, list[int]] = {}
+    for bearing in sorted(conditions):
         c = conditions[bearing]
-        starts.append(c.status)
+        words: list[str] = [c.status]
         if c.status in FLAGGED or bearing == focus:
-            starts += [word for word in (c.diagnosis, c.driver) if word]
+            words += [word for word in (c.diagnosis, c.driver) if word]
+        for word in words:
+            starts.setdefault(word, []).append(bearing)
     return starts
+
+
+def reached_by(starts: Mapping[str, list[int]], origins: list[str]) -> str:
+    """The bearings whose words led to a fact: general advice such as "replace the bearing" then
+    says which bearings it concerns, instead of leaving that to the model."""
+    words: dict[int, list[str]] = {}
+    for origin in origins:
+        for bearing in starts[origin]:
+            words.setdefault(bearing, []).append(origin)
+    return "For " + ", ".join(f"bearing {b} ({', '.join(w)})" for b, w in sorted(words.items()))
 
 
 def prompt(question: str, focus: int | None, moment: datetime, sources: list[Source]) -> str:
@@ -231,21 +245,27 @@ class Copilot:
     def sources(
         self, experiment: str, conditions: Mapping[int, Condition], focus: int | None
     ) -> list[Source]:
-        """The numbered facts: the detector's view of every bearing, then the knowledge."""
+        """The numbered facts: the detector's view of every bearing in rig order, each with its
+        trend, then the knowledge. The prompt names the bearing in focus, so the order never moves.
+        """
         moment = max(c.as_of for c in conditions.values())
         ref = f"Detector, as of {_time(moment)}"
-        order = ([focus] if focus is not None else []) + [b for b in conditions if b != focus]
-        detector = [bearing_fact(b, conditions[b]) for b in order]
-        for b in order:
+        detector = []
+        for b in sorted(conditions):
+            detector.append(bearing_fact(b, conditions[b]))
             health = self._store.health_index(experiment, b)
             trend = None if health is None else trend_fact(b, health, moment)
             if trend:
                 detector.append(trend)
-        knowledge = self._knowledge.around(lookup_starts(conditions, focus))
+        starts = lookup_starts(conditions, focus)
         facts: list[tuple[Literal["detector", "knowledge"], str, str]] = [
             ("detector", text, ref) for text in detector
         ]
-        facts += [("knowledge", f.text, f.source) for f in [*knowledge, *self._knowledge.machine()]]
+        facts += [
+            ("knowledge", f"{reached_by(starts, origins)}: {f.text}", f.source)
+            for f, origins in self._knowledge.around(starts)
+        ]
+        facts += [("knowledge", f.text, f.source) for f in self._knowledge.machine()]
         return [
             Source(id=n, kind=kind, text=text, ref=r)
             for n, (kind, text, r) in enumerate(facts, start=1)

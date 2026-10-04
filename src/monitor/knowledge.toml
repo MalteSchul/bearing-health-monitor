@@ -98,14 +98,14 @@ id = "alert"
 label = "Status"
 source = "detector"
 text = "Alert (yellow): a fault on this bearing has been detected; plan the replacement."
-out = { DECIDED_BY = ["alert rule", "diagnosis rule"], REQUIRES = ["plan the replacement", "inspect every bearing"], LIMITED_BY = ["equal loudness"] }
+out = { DECIDED_BY = ["alert rule", "diagnosis rule"], REQUIRES = ["plan the replacement", "inspect every bearing"], LIMITED_BY = ["equal loudness"], SEE_ALSO = ["no recovery"] }
 
 [[node]]
 id = "danger"
 label = "Status"
 source = "detector"
 text = "Danger (red): the damage is spreading; act now."
-out = { DECIDED_BY = ["danger rule", "diagnosis rule"], REQUIRES = ["act now", "check for secondary damage", "inspect every bearing"], LIMITED_BY = ["equal loudness"] }
+out = { DECIDED_BY = ["danger rule", "diagnosis rule"], REQUIRES = ["act now", "check for secondary damage", "inspect every bearing"], LIMITED_BY = ["equal loudness"], SEE_ALSO = ["no recovery"] }
 
 # --- How the detector decides -------------------------------------------------------------------
 
@@ -150,6 +150,12 @@ id = "equal loudness"
 label = "Rule"
 source = "detector"
 text = "When two bearings show the same fault about equally loud, loudness cannot tell which one is the source, so both are flagged; only an inspection decides."
+
+[[node]]
+id = "no recovery"
+label = "Rule"
+source = "detector"
+text = "Alert and danger stay until maintenance, even when the health index falls again: damage does not heal, so a falling index on a flagged bearing is no sign of recovery."
 
 [[node]]
 id = "what and where"
