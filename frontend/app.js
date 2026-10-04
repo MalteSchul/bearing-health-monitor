@@ -40,6 +40,8 @@ const FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 const CONFIG = {
   responsive: true,
   displaylogo: false,
+  // Plotly's own pop-up tips cover the run selector; the chart has its own hint.
+  showTips: false,
   modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d"],
 };
 // Top to bottom: health index, envelope features, time-domain features.
@@ -198,18 +200,6 @@ function longStops(timestamps) {
 
 const duration = (ms) =>
   ms >= 48 * HOUR_MS ? `${(ms / (24 * HOUR_MS)).toFixed(1)} days` : `${Math.round(ms / HOUR_MS)} h`;
-
-/** What the gaps and cuts in the chart mean, for the runs that have them. */
-function stopNote(timestamps) {
-  const steps = timestamps.slice(1).map((time, i) => millis(time) - millis(timestamps[i]));
-  return (
-    (steps.some((ms) => ms > GAP_MS) ? " Gaps: the rig stood still." : "") +
-    (steps.some((ms) => ms >= CUT_MS)
-      ? " Stops of 12 h or more are cut out of the time axis and marked with a dotted line" +
-        " and //; hover the // for how long."
-      : "")
-  );
-}
 
 /** Contiguous stretches of one status, as shaded rectangles behind the health index. */
 function statusShapes(timestamps, status) {
@@ -396,7 +386,7 @@ function drawChart(health, ratios, condition) {
     ),
     note("Envelope features · one per bearing part", 0, DOMAINS[1][1], title),
     note("Time-domain features · overall level and impulsiveness", 0, DOMAINS[2][1], title),
-    note("Click a feature to hide it,<br>double-click to see it alone.", 1.02, DOMAINS[2][0], {
+    note("Click a name to hide its line,<br>double-click to show only that one.", 1.02, 0, {
       font: { size: 11, color: MUTED },
     }),
   ];
@@ -477,8 +467,7 @@ function drawChart(health, ratios, condition) {
     yaxis: logAxis(DOMAINS[0]),
     yaxis2: logAxis(DOMAINS[1]),
     yaxis3: logAxis(DOMAINS[2]),
-    // The first legend is a key to the shading, nothing to toggle.
-    legend: { ...legendBeside(DOMAINS[0]), itemclick: false, itemdoubleclick: false },
+    legend: legendBeside(DOMAINS[0]),
     legend2: legendBeside(DOMAINS[1]),
     legend3: legendBeside(DOMAINS[2]),
     shapes,
@@ -508,6 +497,12 @@ function followDrag(event) {
   markRange();
 }
 
+/** Legend clicks hide or isolate features; the first legend is a key, not for clicking. */
+function featuresOnly(event) {
+  // Not done with itemclick: Plotly applies the first legend's setting to every legend.
+  return event.data[event.curveNumber].legend !== "legend";
+}
+
 // --- bearing detail ---------------------------------------------------------------------------
 
 async function selectBearing(bearing) {
@@ -524,15 +519,19 @@ async function selectBearing(bearing) {
   const summary = state.bearings.find((b) => b.bearing === bearing);
   $("detail").hidden = false;
   $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
-  $("detail-story").textContent =
-    "Each feature divided by its median over the first 24 h, on the louder sensor; " +
-    "the health index is the largest of them." +
-    stopNote(health.timestamps);
 
   const chart = $("chart");
   await drawChart(health, ratios, summary.condition);
-  chart.removeAllListeners("plotly_relayout");
-  chart.on("plotly_relayout", followDrag);
+  // Set after each draw; removing the old handlers first keeps one per event.
+  const handlers = {
+    plotly_relayout: followDrag,
+    plotly_legendclick: featuresOnly,
+    plotly_legenddoubleclick: featuresOnly,
+  };
+  for (const [event, handler] of Object.entries(handlers)) {
+    chart.removeAllListeners(event);
+    chart.on(event, handler);
+  }
 }
 
 // --- start ------------------------------------------------------------------------------------
