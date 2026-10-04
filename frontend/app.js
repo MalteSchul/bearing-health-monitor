@@ -16,6 +16,8 @@ const STATUS = {
   alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.28)" },
   danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.32)" },
 };
+// What the number on a card means, shown on hovering its label.
+const INDEX_MEANING = "The bearing's largest vibration feature, relative to its own first 24 h";
 // The alarms, with what each asks of the operator.
 const ACTIONS = { alert: "Plan the replacement", danger: "Reduce load or stop" };
 
@@ -260,7 +262,7 @@ function buildCard(bearing) {
       <span class="name">Bearing ${bearing}</span>
       <span class="pill"></span>
     </span>
-    <span class="index"><span class="value"></span><small>health index</small></span>
+    <span class="index"><span class="value"></span><small title="${INDEX_MEANING}">health index ⓘ</small></span>
     <span class="facts"></span>`;
   return card;
 }
