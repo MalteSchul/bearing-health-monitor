@@ -254,6 +254,16 @@ class FeatureStore:
     def features(self, experiment: str, bearing: int) -> BearingFeatures | None:
         return self._features.get((experiment, bearing))
 
+    def conditions(
+        self, experiment: str, at: datetime | None = None
+    ) -> dict[int, Condition] | None:
+        """Every bearing's condition as of `at`, without the documented outcome: for consumers
+        that must not see hindsight, like the copilot."""
+        run = self._runs.get(experiment)
+        if run is None:
+            return None
+        return {b: _bearing_summary(b, data, at).condition for b, data in run.bearings.items()}
+
     def health_index(self, experiment: str, bearing: int) -> HealthIndex | None:
         return self._health.get((experiment, bearing))
 

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from monitor.api import create_app
 from monitor.config import Settings
+from monitor.copilot import Unavailable
 from monitor.features import FEATURES, ChannelFeatures
 from monitor.store import ChannelSeries
 
@@ -149,10 +150,15 @@ def test_bearings_report_their_latest_condition(tmp_path):
         "status": "alert",
         "index": pytest.approx(10, rel=0.1),
         "driver": "env_bpfo",
+        "part_levels": pytest.approx(
+            {"outer race": 10, "inner race": 1, "roller element": 1, "cage": 1}, rel=0.1
+        ),
         "diagnosis": "outer race",
         "alert_at": ALERT_AT.isoformat(),
         "danger_at": None,
         "crosstalk_from": None,
+        "crosstalk_feature": None,
+        "crosstalk_factor": None,
     }
     assert (healthy["condition"]["status"], healthy["condition"]["alert_at"]) == ("ok", None)
 
@@ -400,3 +406,147 @@ def test_response_model_has_a_series_for_every_feature():
     assert set(ChannelSeries.model_fields) == {"channel", "timestamps"} | {
         f.name for f in fields(ChannelFeatures)
     }
+
+
+COPILOT = "/api/v1/experiments/set2/copilot"
+
+
+class FakeWriter:
+    """Stands in for the model: records what it was sent and answers with a fixed text."""
+
+    def __init__(self, answer: str = "Bearing 1 is in alert [1].") -> None:
+        self.answer = answer
+        self.prompts: list[str] = []
+
+    def __call__(self, system: str, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.answer
+
+
+def copilot_client(tmp_path, writer: object = None, **overrides: object) -> TestClient:
+    settings = Settings(frontend_dir=tmp_path, anthropic_api_key=None, **overrides)
+    return TestClient(create_app(settings, writer=writer))  # type: ignore[arg-type]
+
+
+def test_copilot_without_a_key_returns_the_facts_but_no_answer(tmp_path):
+    client = copilot_client(tmp_path)
+
+    body = client.post(COPILOT, json={"question": "Why is bearing 1 yellow?", "bearing": 1}).json()
+
+    assert body["answer"] is None
+    assert "No API key" in body["note"]
+    rig, first = body["sources"][:2]
+    assert (rig["id"], rig["kind"], rig["text"]) == (1, "detector", "Rig: alert, from bearing 1.")
+    assert first["text"].startswith(f"Bearing 1: alert since {ALERT_AT:%Y-%m-%d %H:%M}")
+    texts = [s["text"] for s in body["sources"]]
+    assert "For bearing 1 (alert): Alert (amber)" in " ".join(texts), "explained, and for whom"
+    assert any("2,000 rpm" in t for t in texts), "machine facts always included"
+
+
+def test_copilot_facts_use_plain_names_never_code_names(tmp_path):
+    client = copilot_client(tmp_path)
+
+    body = client.post(COPILOT, json={"question": "Why?", "bearing": 1}).json()
+
+    texts = " ".join(s["text"] for s in body["sources"])
+    assert "highest feature: outer race signal" in texts
+    assert [code for code in FEATURES if "_" in code and code in texts] == []
+
+
+def test_copilot_sends_the_facts_and_the_tagged_question_to_the_writer(tmp_path):
+    writer = FakeWriter()
+    client = copilot_client(tmp_path, writer=writer)
+
+    body = client.post(COPILOT, json={"question": "What should I do?", "bearing": 1}).json()
+
+    assert body["answer"] == "Bearing 1 is in alert [1]."
+    [sent] = writer.prompts
+    assert "The technician is looking at bearing 1." in sent
+    assert f"[1] {body['sources'][0]['text']}" in sent
+    assert sent.endswith("<question>What should I do?</question>")
+
+
+def test_copilot_answers_in_plain_text_when_the_model_writes_bold(tmp_path):
+    writer = FakeWriter("**Bearing 1 is in alert.** [1] Plan the replacement [2].")
+    client = copilot_client(tmp_path, writer=writer)
+
+    body = client.post(COPILOT, json={"question": "What should I do?", "bearing": 1}).json()
+
+    assert body["answer"] == "Bearing 1 is in alert. [1] Plan the replacement [2]."
+
+
+def test_copilot_answers_about_the_whole_run_without_a_bearing(tmp_path):
+    client = copilot_client(tmp_path)
+
+    body = client.post(COPILOT, json={"question": "Which bearing is the problem?"}).json()
+
+    detector = [s["text"] for s in body["sources"] if s["kind"] == "detector"]
+    # The rig, then each bearing's status and its trend.
+    assert [t.split(":")[0] for t in detector[:4]] == [
+        "Rig",
+        "Bearing 1",
+        "Bearing 1 health index",
+        "Bearing 2",
+    ]
+
+
+def test_copilot_lists_bearings_in_rig_order_whichever_is_in_focus(tmp_path):
+    client = copilot_client(tmp_path)
+
+    body = client.post(COPILOT, json={"question": "Status?", "bearing": 2}).json()
+
+    assert body["sources"][1]["text"].startswith("Bearing 1:")
+
+
+def test_copilot_only_knows_what_was_known_at_that_time(tmp_path):
+    client = copilot_client(tmp_path)
+    at = {"at": (FAULT_FROM + timedelta(minutes=30)).isoformat()}
+
+    body = client.post(COPILOT, params=at, json={"question": "Status?", "bearing": 1}).json()
+
+    assert body["sources"][1]["text"].startswith("Bearing 1: ok;")
+    assert body["sources"][1]["ref"] == f"Detector, as of {FAULT_FROM:%Y-%m-%d} 12:30"
+
+
+def test_copilot_reports_why_the_writer_gave_no_answer(tmp_path):
+    reason = "The copilot's language model could not be reached."
+
+    def unavailable(system: str, prompt: str) -> str:
+        raise Unavailable(reason)
+
+    client = copilot_client(tmp_path, writer=unavailable)
+
+    body = client.post(COPILOT, json={"question": "Why?"}).json()
+
+    assert (body["answer"], body["note"]) == (None, reason)
+    assert body["sources"]
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "status"),
+    [
+        ("/api/v1/experiments/set9/copilot", {"question": "Why?"}, 404),
+        (COPILOT, {"question": "Why?", "bearing": 7}, 422),
+        (COPILOT, {"question": "   "}, 422),
+        (COPILOT, {"question": "x" * 501}, 422),
+    ],
+)
+def test_copilot_rejects_unknown_runs_bearings_and_bad_questions(tmp_path, path, payload, status):
+    client = copilot_client(tmp_path)
+
+    assert client.post(path, json=payload).status_code == status
+
+
+def test_copilot_before_the_first_snapshot_is_404(tmp_path):
+    client = copilot_client(tmp_path)
+    at = {"at": (START - timedelta(hours=1)).isoformat()}
+
+    assert client.post(COPILOT, params=at, json={"question": "Why?"}).status_code == 404
+
+
+def test_copilot_limits_questions_per_minute(tmp_path):
+    client = copilot_client(tmp_path, writer=FakeWriter(), copilot_questions_per_minute=2)
+
+    codes = [client.post(COPILOT, json={"question": "Why?"}).status_code for _ in range(3)]
+
+    assert codes == [200, 200, 429]

@@ -8,3 +8,5 @@ data/raw
 frontend/node_modules
 tests
 .github
+# Local secrets: the image gets its key from Azure, never from a file
+.env

@@ -36,6 +36,31 @@
     </div>
     <section id="bearings" class="grid" aria-label="Bearings"></section>
 
+    <section id="copilot" class="panel" aria-labelledby="copilot-title" hidden>
+      <div class="panel-head">
+        <h2 id="copilot-title">Ask the copilot</h2>
+        <p id="ask-scope" class="muted"></p>
+      </div>
+      <form id="ask">
+        <input id="question" type="text" maxlength="500" required autocomplete="off"
+               aria-label="Question" placeholder="Ask about the moment shown, in any language">
+        <button id="ask-button" type="submit">Ask</button>
+      </form>
+      <div id="suggestions" aria-label="Suggested questions"></div>
+      <p id="copilot-status" role="status"></p>
+      <div id="reply" hidden>
+        <p id="reply-label"></p>
+        <p id="stale-note" hidden>The dashboard now shows another moment than this answer: ask again for it.</p>
+        <p id="answer"></p>
+        <p id="answer-note"></p>
+        <ul id="cited" class="fact-list" aria-label="Cited facts"></ul>
+        <details id="other-facts">
+          <summary></summary>
+          <ul class="fact-list"></ul>
+        </details>
+      </div>
+    </section>
+
     <section id="overview" class="panel" hidden>
       <div class="panel-head">
         <h2 id="overview-title"></h2>

@@ -310,6 +310,190 @@ button {
   opacity: 0.55;
 }
 
+/* --- copilot --- */
+
+#copilot {
+  padding-bottom: 20px;
+}
+
+#ask {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+#question {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font: inherit;
+}
+
+#question:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: -1px;
+}
+
+/* A fixed width, so the row does not shift when the label turns to "Asking…". */
+#ask-button {
+  width: 104px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+#suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#suggestions button {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 13px;
+}
+
+#suggestions button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+#ask-button:disabled,
+#suggestions button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+#copilot-status {
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#copilot-status:empty {
+  display: none;
+}
+
+#copilot-status.error {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: #fbe9e9;
+  color: #8f1f1f;
+}
+
+#reply {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+#reply > * {
+  transition: opacity 0.2s;
+}
+
+/* Kept for reading, but stepped back: it was about another moment. */
+#reply.stale > :not(#stale-note) {
+  opacity: 0.45;
+}
+
+#reply-label {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#reply-label strong {
+  color: var(--ink);
+}
+
+#stale-note {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#answer {
+  max-width: 80ch;
+  margin: 10px 0 0;
+  font-size: 16px;
+  white-space: pre-line;
+}
+
+#answer a {
+  color: #2a63b8;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+#answer a:hover {
+  text-decoration: underline;
+}
+
+/* A citation to a fact that was never looked up: made up, so marked like a spelling error. */
+.unknown-citation {
+  text-decoration: underline wavy #d03b3b;
+}
+
+#answer-note {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 14px;
+}
+
+#answer-note:empty {
+  display: none;
+}
+
+.fact-list {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fact-list li {
+  padding: 6px 12px;
+  border-left: 3px solid var(--line);
+  font-size: 14px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.fact-list li[aria-current="true"] {
+  border-left-color: var(--ink);
+  background: #fdf3d7;
+}
+
+.fact-id {
+  font-weight: 600;
+}
+
+.fact-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#other-facts {
+  margin-top: 12px;
+}
+
+#other-facts summary {
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
 #error {
   margin: 16px 0;
   padding: 12px 16px;
