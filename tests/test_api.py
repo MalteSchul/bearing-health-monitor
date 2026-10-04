@@ -172,6 +172,31 @@ def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
     assert [t for t, _, _, status in series if status == "alarm"][0] == ALARM_AT.isoformat()
 
 
+def test_health_index_is_the_largest_ratio_at_each_snapshot(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    ratios = client.get("/api/v1/experiments/set2/bearings/1/ratios").json()
+    health = client.get("/api/v1/experiments/set2/bearings/1/health-index").json()
+
+    assert ratios["timestamps"] == health["timestamps"]
+    by_feature = [ratios[name] for name in FEATURES]
+    largest = [None if v[0] is None else max(v) for v in zip(*by_feature, strict=True)]
+    assert largest == health["index"]
+    assert ratios["env_bpfo"][-1] == pytest.approx(10, rel=0.1)
+
+
+def test_ratios_take_the_worse_of_two_channels(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set1/bearings/3/ratios").json()
+
+    # Both channels grow by the same step; from the smaller baseline that is the larger ratio.
+    last, baseline_median = SNAPSHOTS - 1, 71.5 / 1000  # rms offset of snapshots 0-143
+    channel5, channel6 = ((c + last / 1000) / (c + baseline_median) for c in (5, 6))
+    assert channel5 > channel6
+    assert body["rms"][last] == round(channel5, 3)
+
+
 def condition_at(client: TestClient, path: str, at: datetime) -> dict[str, object]:
     response = client.get(path, params={"at": at.isoformat()})
     assert response.status_code == 200, response.text
@@ -291,6 +316,7 @@ def test_bearing_with_two_sensors_returns_both_channels(tmp_path):
         "/api/v1/experiments/set9/bearings/1/features",
         "/api/v1/experiments/set2/bearings/3/features",
         "/api/v1/experiments/set2/bearings/3/health-index",
+        "/api/v1/experiments/set2/bearings/3/ratios",
     ],
 )
 def test_unknown_experiment_or_bearing_is_404(tmp_path, path):

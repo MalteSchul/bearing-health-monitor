@@ -36,6 +36,8 @@ Run `just` to list all recipes.
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
   per snapshot
+- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/ratios`: each feature relative to its
+  baseline, what the detector compares (the health index is the largest)
 - `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.

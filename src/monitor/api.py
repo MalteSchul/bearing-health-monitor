@@ -12,6 +12,7 @@ from monitor.store import (
     BearingFeatures,
     BearingSummary,
     ExperimentSummary,
+    FeatureRatios,
     FeatureStore,
     HealthIndex,
     NoDataYet,
@@ -98,6 +99,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if health is None:
             raise no_bearing(experiment, bearing)
         return health
+
+    # Served, not recomputed in the browser: the baseline rule lives in one place.
+    @v1.get("/experiments/{experiment}/bearings/{bearing}/ratios")
+    def bearing_ratios(experiment: str, bearing: int) -> FeatureRatios:
+        ratios = store.ratios(experiment, bearing)
+        if ratios is None:
+            raise no_bearing(experiment, bearing)
+        return ratios
 
     # The bearing exists, but nothing was known about it yet at that time.
     @app.exception_handler(NoDataYet)
