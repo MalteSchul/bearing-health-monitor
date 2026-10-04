@@ -29,27 +29,56 @@ Run `just` to list all recipes.
 
 ## Architecture
 
-- `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
-- `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing and its condition; every
-  shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too.
-  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time. An experiment
-  also reports its `machine`: the worst bearing's status and which bearings have it
-- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
-- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
-  per snapshot: `baseline`, `ok`, `crosstalk`, `alert` (plan the replacement), `danger` (act now)
-- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/ratios`: each feature relative to its
-  baseline, what the detector compares (the health index is the largest)
-- `GET /api/v1/experiments/{experiment}/evaluation`: hindsight per bearing (detected, missed,
-  false alarm, quiet) and the operating hours each level came before the run ended
-- `POST /api/v1/experiments/{experiment}/copilot?at=…` with `{"question": "...", "bearing": 3}`:
-  the copilot's answer, built only from cited facts (the detector at that moment and
-  `src/monitor/knowledge.toml`). Needs `ANTHROPIC_API_KEY` in the environment or in `.env`
-  (copy `.env.example`); without it, only the facts
-- `frontend/`: static dashboard, served by the API at `/`. `?run=set2&bearing=1&at=2004-02-16T04:12:39`
-  opens a replay at that moment; without `bearing` it shows the whole rig. The directory is configurable
-  via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
-  backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.
-- `data/processed/`: precomputed features shipped with the image. Raw data is never committed.
+```mermaid
+flowchart LR
+    nasa[("NASA IMS dataset")] -- "just data" --> raw["data/raw/ims<br/>never committed"]
+    raw -- "just features" --> parquet[("data/processed/<br/>features.parquet")]
+    parquet -- "loaded at startup" --> detector
+
+    subgraph app ["Container: FastAPI"]
+        detector["Detector<br/>health index, status, evaluation"] --> api["REST API<br/>/api/v1"]
+        detector -- "facts at that moment" --> copilot["Copilot"]
+        kg[("Knowledge graph<br/>knowledge.toml")] --> copilot
+        copilot --> api
+    end
+
+    copilot -- "numbered facts + question" --> llm["LLM API"]
+    api --> dashboard["Dashboard<br/>frontend/, Plotly.js"]
+```
+
+```mermaid
+flowchart LR
+    pr["Pull request"] --> ci["GitHub Actions<br/>ruff, mypy, pytest, docker build"]
+    ci -- "merge to main, OIDC login" --> acr[("Azure Container Registry<br/>image tagged with commit")]
+    acr --> aca["Azure Container Apps"]
+    aca --> check["CI checks /api/version<br/>reports the commit"]
+```
+
+Endpoints (full schema at `/docs`):
+
+- `GET /api/health`, `GET /api/version`: liveness and deployed commit, unversioned
+- `GET /api/v1/experiments[/{experiment}[/bearings[/{bearing}]]]`: condition of runs and bearings; `?at=` as known then
+- `GET .../bearings/{bearing}/features`: feature trends
+- `GET .../bearings/{bearing}/health-index`: index and status per snapshot
+  (`baseline`, `ok`, `crosstalk`, `alert`, `danger`)
+- `GET .../bearings/{bearing}/ratios`: each feature over its baseline; the health index is the largest
+- `GET /api/v1/experiments/{experiment}/evaluation`: hindsight per bearing (detected, missed, false alarm, quiet)
+- `POST /api/v1/experiments/{experiment}/copilot?at=`: answer from cited facts; needs
+  `ANTHROPIC_API_KEY` (see `.env.example`), else facts only
+
+Code in `src/monitor/`:
+
+- `ims.py`: dataset layout and checks
+- `features.py`: time-domain and envelope features per snapshot
+- `health.py`: detector, judges each snapshot only from the snapshots up to it
+- `evaluation.py`: alarms vs. the documented failures (hindsight)
+- `store.py`: loads the Parquet file, runs the detector, shapes responses
+- `knowledge.py`, `knowledge.toml`: knowledge graph (networkx)
+- `copilot.py`: retrieval and the model call
+- `api.py`, `config.py`: routes and settings (`MONITOR_*` environment variables)
+
+Dashboard: `frontend/`, served at `/`; `?run=set2&bearing=1&at=2004-02-16T04:12:39` opens a replay.
+`MONITOR_FRONTEND_DIR` points at another build (e.g. React/Vite), `MONITOR_CORS_ORIGINS` allows a separate dev server.
 
 ## Data
 
