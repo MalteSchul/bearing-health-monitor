@@ -170,6 +170,12 @@ def bearing_fact(bearing: int, condition: Condition, name: Callable[[str], str])
     )
     if c.crosstalk_from is not None:
         text += f"; it hears bearing {c.crosstalk_from}"
+        # The evidence, so the verdict can be checked rather than taken on trust.
+        if c.crosstalk_feature is not None and c.crosstalk_factor is not None:
+            text += (
+                f", where the {name(c.crosstalk_feature)} rose {c.crosstalk_factor:.1f}x as much "
+                "over the last hour"
+            )
     text += "."
     if c.part_levels is None:
         return text

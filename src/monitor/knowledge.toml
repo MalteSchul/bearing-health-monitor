@@ -143,7 +143,7 @@ out = { BUILDS_ON = ["alert rule"] }
 id = "crosstalk rule"
 label = "Rule"
 source = "detector"
-text = "A raised index counts as crosstalk when another bearing shows the same strongest feature at least 3x louder over the last hour; those snapshots are not the bearing's own evidence."
+text = "A raised index counts as crosstalk when the bearing's strongest feature rose at least 3x as much on another bearing over the last hour; those snapshots are not the bearing's own evidence. Each rise is measured against that bearing's own reference, so differences in sensors and mounting cancel out."
 out = { BUILDS_ON = ["health index rule", "what and where"] }
 
 [[node]]
@@ -157,7 +157,7 @@ out = { BUILDS_ON = ["baseline rule"] }
 id = "equal loudness"
 label = "Rule"
 source = "detector"
-text = "When two bearings show the same fault about equally loud, loudness cannot tell which one is the source, so both are flagged; only an inspection decides."
+text = "When the same fault has risen about as much on two bearings, less than 3x apart, the comparison cannot tell which one is the source, so both are flagged; only an inspection decides."
 out = { BUILDS_ON = ["what and where"] }
 
 [[node]]

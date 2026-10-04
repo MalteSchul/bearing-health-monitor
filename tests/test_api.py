@@ -157,6 +157,8 @@ def test_bearings_report_their_latest_condition(tmp_path):
         "alert_at": ALERT_AT.isoformat(),
         "danger_at": None,
         "crosstalk_from": None,
+        "crosstalk_feature": None,
+        "crosstalk_factor": None,
     }
     assert (healthy["condition"]["status"], healthy["condition"]["alert_at"]) == ("ok", None)
 

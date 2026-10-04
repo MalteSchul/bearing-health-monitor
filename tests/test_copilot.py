@@ -66,11 +66,16 @@ def test_crosstalk_names_the_bearing_it_hears_and_its_part():
             part_levels=OUTER_RACE,
             diagnosis="outer race",
             crosstalk_from=3,
+            crosstalk_feature="env_bpfo",
+            crosstalk_factor=18.19,
         ),
         NAME,
     )
 
-    assert "highest feature: outer race signal; it hears bearing 3." in fact
+    assert (
+        "highest feature: outer race signal; it hears bearing 3, where the outer race signal "
+        "rose 18.2x as much over the last hour." in fact
+    )
     assert fact.endswith("points to the outer race, the fault it hears.")
 
 

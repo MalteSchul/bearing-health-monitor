@@ -213,6 +213,11 @@ def test_neighbour_with_the_same_fault_far_weaker_is_crosstalk():
         1,
         None,
     )
+    # The evidence: its strongest feature rose 38 / 5 times as much on bearing 1.
+    assert (result[2].crosstalk_feature, result[2].crosstalk_factor) == (
+        "env_bpfo",
+        pytest.approx(7.6),
+    )
     # The fault it picks up, not one of its own.
     assert result[2].diagnosis == "outer race"
 

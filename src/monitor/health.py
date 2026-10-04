@@ -8,7 +8,7 @@ have seen at the time.
 from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
@@ -70,8 +70,11 @@ class Condition:
     diagnosis: str | None = None
     alert_at: Timestamp | None = None
     danger_at: Timestamp | None = None
-    # For crosstalk: the bearing whose fault this one picks up.
+    # For crosstalk: the bearing whose fault this one picks up, and the evidence: the feature
+    # compared and how many times more it rose there over the last hour.
     crosstalk_from: int | None = None
+    crosstalk_feature: str | None = None
+    crosstalk_factor: float | None = None
 
 
 @dataclass(frozen=True)
@@ -161,16 +164,24 @@ def held(index: pd.Series) -> pd.Series:
     return pd.Series(holding, index=index.index)
 
 
-def loudest_neighbour(recent: npt.NDArray[np.float64], bearing: int) -> tuple[int, float]:
-    """Position of the other bearing that showed this one's strongest feature loudest, and how
-    many times louder. `recent` holds each bearing's median ratio per feature over the last hour.
-    """
+class Neighbour(NamedTuple):
+    """The other bearing in which this one's strongest feature rose most."""
+
+    position: int
+    feature: str
+    # How many times more it rose there. Each rise is a ratio to that bearing's own baseline, so
+    # differences in sensors and mounting cancel out.
+    factor: float
+
+
+def loudest_neighbour(recent: npt.NDArray[np.float64], bearing: int) -> Neighbour:
+    """`recent` holds each bearing's median ratio per feature over the last hour."""
     feature = int(recent[bearing].argmax())
     loudness = recent[:, feature].copy()
     own = loudness[bearing]
     loudness[bearing] = -np.inf
     loudest = int(loudness.argmax())
-    return loudest, float(loudness[loudest] / own)
+    return Neighbour(loudest, FEATURES[feature], float(loudness[loudest] / own))
 
 
 def part_levels(recent: npt.NDArray[np.float64]) -> dict[str, float]:
@@ -203,7 +214,7 @@ def assess(run: pd.DataFrame) -> list[History]:
         own = index.loc[bearing]
         values = own["health_index"]
         explained = [
-            value >= THRESHOLD and loudest_neighbour(recent[i], position)[1] >= CROSSTALK_FACTOR
+            value >= THRESHOLD and loudest_neighbour(recent[i], position).factor >= CROSSTALK_FACTOR
             for i, value in enumerate(values)
         ]
         elevated = held(values).tolist()
@@ -233,7 +244,7 @@ def assess(run: pd.DataFrame) -> list[History]:
                 status = "danger"
             elif alert_at is not None:
                 status = "alert"
-            source = loudest_neighbour(recent[i], position)[0] if crosstalk else None
+            heard = loudest_neighbour(recent[i], position) if crosstalk else None
             levels = None if status == "ok" else part_levels(recent[i, position])
             conditions.append(
                 Condition(
@@ -245,7 +256,9 @@ def assess(run: pd.DataFrame) -> list[History]:
                     diagnosis=None if levels is None else diagnose(levels),
                     alert_at=alert_at,
                     danger_at=danger_at,
-                    crosstalk_from=None if source is None else int(bearings[source]),
+                    crosstalk_from=None if heard is None else int(bearings[heard.position]),
+                    crosstalk_feature=None if heard is None else heard.feature,
+                    crosstalk_factor=None if heard is None else round(heard.factor, 3),
                 )
             )
         histories.append(History(bearing=int(bearing), conditions=tuple(conditions)))
