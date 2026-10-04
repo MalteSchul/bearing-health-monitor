@@ -17,7 +17,7 @@ from typing import Annotated, Literal, Protocol
 import anthropic
 from pydantic import BaseModel, StringConstraints
 
-from monitor.health import Condition
+from monitor.health import Condition, machine_condition
 from monitor.knowledge import Knowledge
 from monitor.store import FeatureStore, HealthIndex
 
@@ -152,6 +152,21 @@ def _time(t: datetime) -> str:
     return t.strftime("%Y-%m-%d %H:%M")
 
 
+def _listed(bearings: list[int]) -> str:
+    *rest, last = bearings
+    return f"bearings {', '.join(map(str, rest))} and {last}" if rest else f"bearing {last}"
+
+
+def rig_fact(conditions: Mapping[int, Condition]) -> str:
+    """The rig as a whole, as the rig light shows it: it stops as a whole, for its worst bearing."""
+    machine = machine_condition(dict(conditions))
+    if machine.status == "ok":
+        return "Rig: ok."
+    if machine.status == "baseline":
+        return "Rig: learning its baseline (first 24 h)."
+    return f"Rig: {machine.status}, from {_listed(machine.bearings)}."
+
+
 def bearing_fact(bearing: int, condition: Condition, name: Callable[[str], str]) -> str:
     """`name` turns the detector's words into what people call them: the model only writes words
     it is given, so it never sees a code name."""
@@ -261,13 +276,14 @@ class Copilot:
     def sources(
         self, experiment: str, conditions: Mapping[int, Condition], focus: int | None
     ) -> list[Source]:
-        """The numbered facts: the detector's view of every bearing in rig order, each with its
-        trend, then the knowledge. The prompt names the bearing in focus, so the order never moves.
+        """The numbered facts: the detector's view of the rig, then of every bearing in rig order,
+        each with its trend, then the knowledge. The prompt names the bearing in focus, so the
+        order never moves.
         """
         moment = max(c.as_of for c in conditions.values())
         ref = f"Detector, as of {_time(moment)}"
         name = self._knowledge.name
-        detector = []
+        detector = [rig_fact(conditions)]
         for b in sorted(conditions):
             detector.append(bearing_fact(b, conditions[b], name))
             health = self._store.health_index(experiment, b)

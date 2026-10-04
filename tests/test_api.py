@@ -435,8 +435,8 @@ def test_copilot_without_a_key_returns_the_facts_but_no_answer(tmp_path):
 
     assert body["answer"] is None
     assert "No API key" in body["note"]
-    first = body["sources"][0]
-    assert (first["id"], first["kind"]) == (1, "detector")
+    rig, first = body["sources"][:2]
+    assert (rig["id"], rig["kind"], rig["text"]) == (1, "detector", "Rig: alert, from bearing 1.")
     assert first["text"].startswith(f"Bearing 1: alert since {ALERT_AT:%Y-%m-%d %H:%M}")
     texts = [s["text"] for s in body["sources"]]
     assert "For bearing 1 (alert): Alert (yellow)" in " ".join(texts), "explained, and for whom"
@@ -472,8 +472,9 @@ def test_copilot_answers_about_the_whole_run_without_a_bearing(tmp_path):
     body = client.post(COPILOT, json={"question": "Which bearing is the problem?"}).json()
 
     detector = [s["text"] for s in body["sources"] if s["kind"] == "detector"]
-    # Each bearing's status, then its trend.
-    assert [t.split(":")[0] for t in detector[:3]] == [
+    # The rig, then each bearing's status and its trend.
+    assert [t.split(":")[0] for t in detector[:4]] == [
+        "Rig",
         "Bearing 1",
         "Bearing 1 health index",
         "Bearing 2",
@@ -485,7 +486,7 @@ def test_copilot_lists_bearings_in_rig_order_whichever_is_in_focus(tmp_path):
 
     body = client.post(COPILOT, json={"question": "Status?", "bearing": 2}).json()
 
-    assert body["sources"][0]["text"].startswith("Bearing 1:")
+    assert body["sources"][1]["text"].startswith("Bearing 1:")
 
 
 def test_copilot_only_knows_what_was_known_at_that_time(tmp_path):
@@ -494,8 +495,8 @@ def test_copilot_only_knows_what_was_known_at_that_time(tmp_path):
 
     body = client.post(COPILOT, params=at, json={"question": "Status?", "bearing": 1}).json()
 
-    assert body["sources"][0]["text"].startswith("Bearing 1: ok;")
-    assert body["sources"][0]["ref"] == f"Detector, as of {FAULT_FROM:%Y-%m-%d} 12:30"
+    assert body["sources"][1]["text"].startswith("Bearing 1: ok;")
+    assert body["sources"][1]["ref"] == f"Detector, as of {FAULT_FROM:%Y-%m-%d} 12:30"
 
 
 def test_copilot_reports_why_the_writer_gave_no_answer(tmp_path):

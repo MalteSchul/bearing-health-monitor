@@ -85,6 +85,12 @@ def test_every_status_with_an_index_reaches_its_definition(status):
     assert {"health index rule", "baseline rule"} <= ids
 
 
+@pytest.mark.parametrize("status", ["alert", "danger"])
+def test_every_action_on_a_bearing_is_scheduled_for_the_whole_rig(status):
+    # One shaft: when the rig stops is decided once, by the most urgent bearing.
+    assert "one stop" in {f.id for f, _ in KNOWLEDGE.around([status])}
+
+
 def test_rules_bring_the_rules_they_build_on_however_deep():
     # danger -> danger rule -> alert rule -> health index rule -> baseline rule: four arrows.
     reached = {f.id: origins for f, origins in KNOWLEDGE.around(["danger"])}

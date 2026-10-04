@@ -14,6 +14,7 @@ from monitor.copilot import (
     lookup_starts,
     prompt,
     reached_by,
+    rig_fact,
     trend_fact,
 )
 from monitor.health import Condition
@@ -98,6 +99,21 @@ def test_bearing_in_baseline_has_no_index():
     fact = bearing_fact(1, condition("baseline", index=None, driver=None), NAME)
 
     assert fact == "Bearing 1: learning its baseline (first 24 h), no health index yet."
+
+
+@pytest.mark.parametrize(
+    ("statuses", "fact"),
+    [
+        (["ok", "alert", "danger", "danger"], "Rig: danger, from bearings 3 and 4."),
+        (["alert", "ok"], "Rig: alert, from bearing 1."),
+        (["crosstalk", "ok"], "Rig: ok."),
+        (["baseline", "baseline"], "Rig: learning its baseline (first 24 h)."),
+    ],
+)
+def test_rig_shows_its_most_urgent_bearings(statuses, fact):
+    conditions = {b: condition(s) for b, s in enumerate(statuses, start=1)}
+
+    assert rig_fact(conditions) == fact
 
 
 def health(values: list[float | None], step: timedelta = timedelta(hours=1)) -> HealthIndex:

@@ -161,6 +161,12 @@ text = "When the same fault has risen about as much on two bearings, less than 3
 out = { BUILDS_ON = ["what and where"] }
 
 [[node]]
+id = "one stop"
+label = "Rule"
+source = "detector"
+text = "The four bearings share one shaft, so the rig stops as a whole: its most urgent bearing decides when, and every bearing in alert or danger is replaced at that stop. The rig light shows that most urgent status; a bearing that only hears a neighbour counts as ok."
+
+[[node]]
 id = "no recovery"
 label = "Rule"
 source = "detector"
@@ -178,13 +184,15 @@ text = "All bearings of one type share the same fault frequencies, so a frequenc
 id = "plan the replacement"
 label = "Action"
 source = "iso-20816"
-text = "Plan the replacement: order the bearing and schedule the change for the next planned stop; keep the machine running and monitored meanwhile."
+text = "Plan the replacement: order the bearing and change it at the rig's next stop."
+out = { SCHEDULED_BY = ["one stop"] }
 
 [[node]]
 id = "act now"
 label = "Action"
 source = "iso-20816"
 text = "Act now: reduce the load or stop as soon as it is safe, and replace the bearing; running on risks damage to the shaft, housing and neighbouring parts."
+out = { SCHEDULED_BY = ["one stop"] }
 
 [[node]]
 id = "check for secondary damage"
