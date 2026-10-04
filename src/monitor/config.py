@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,3 +19,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = []
     # Git commit the running build was made from. CI bakes it into the image; "dev" otherwise.
     commit_sha: str = "dev"
+    # The usual variable name, without the prefix. Without a key the copilot still returns the
+    # facts it looked up, only no written answer.
+    anthropic_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "anthropic_api_key")
+    )
+    copilot_model: str = "claude-opus-5-5"
+    # Every question costs money and the URL is public.
+    copilot_questions_per_minute: int = 10

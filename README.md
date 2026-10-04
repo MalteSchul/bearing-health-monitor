@@ -41,6 +41,9 @@ Run `just` to list all recipes.
   baseline, what the detector compares (the health index is the largest)
 - `GET /api/v1/experiments/{experiment}/evaluation`: hindsight per bearing (detected, missed,
   false alarm, quiet) and the operating hours each level came before the run ended
+- `POST /api/v1/experiments/{experiment}/copilot?at=…` with `{"question": "...", "bearing": 3}`:
+  an answer from Claude, built only from cited facts (the detector at that moment and
+  `src/monitor/knowledge.toml`). Needs `ANTHROPIC_API_KEY`; without it, only the facts
 - `frontend/`: static dashboard, served by the API at `/`. `?run=set2&bearing=1&at=2004-02-16T04:12:39`
   opens a replay at that moment. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without

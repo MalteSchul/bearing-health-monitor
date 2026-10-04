@@ -8,7 +8,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import NaiveDatetime
 
 from monitor.config import Settings
+from monitor.copilot import (
+    ClaudeWriter,
+    Copilot,
+    CopilotAnswer,
+    Question,
+    RateLimit,
+    RateLimited,
+    UnknownBearing,
+    Writer,
+)
 from monitor.evaluation import RunEvaluation
+from monitor.knowledge import Knowledge
 from monitor.store import (
     BearingFeatures,
     BearingSummary,
@@ -31,11 +42,18 @@ AsOf = Annotated[
 ]
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, writer: Writer | None = None) -> FastAPI:
+    """`writer` replaces the Claude call, for tests; by default it is Claude if a key is set."""
     settings = settings or Settings()
     # Loaded before serving: a missing file stops the container from starting, so a broken
     # revision never takes traffic.
     store = FeatureStore.load(settings.features_path)
+    key = settings.anthropic_api_key
+    if writer is None and key is not None:
+        writer = ClaudeWriter(key.get_secret_value(), settings.copilot_model)
+    copilot = Copilot(
+        store, Knowledge.load(), writer, RateLimit(settings.copilot_questions_per_minute)
+    )
     # The commit is the version: every merge to main is deployed, nobody cuts releases.
     app = FastAPI(title="Bearing Health Monitor", version=settings.commit_sha)
 
@@ -43,7 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.cors_origins,
-            allow_methods=["GET"],
+            allow_methods=["GET", "POST"],
             allow_headers=["*"],
         )
     # Feature series are long arrays of similar numbers and shrink to about a third.
@@ -120,6 +138,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if ratios is None:
             raise no_bearing(experiment, bearing)
         return ratios
+
+    # The run, not a bearing: the bearings share a shaft and the answer draws on all of them.
+    # POST, because every call costs money and the answer can differ each time.
+    @v1.post("/experiments/{experiment}/copilot", tags=["copilot"])
+    def ask_copilot(experiment: str, question: Question, at: AsOf = None) -> CopilotAnswer:
+        try:
+            answer = copilot.ask(experiment, question, at)
+        except UnknownBearing as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except RateLimited as exc:
+            raise HTTPException(
+                429, "Too many questions, try again in a minute", headers={"Retry-After": "60"}
+            ) from exc
+        if answer is None:
+            raise HTTPException(404, f"Unknown experiment {experiment!r}")
+        return answer
 
     # The bearing exists, but nothing was known about it yet at that time.
     @app.exception_handler(NoDataYet)

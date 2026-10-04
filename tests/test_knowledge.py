@@ -1,0 +1,96 @@
+import re
+from typing import get_args
+
+import pytest
+
+from monitor.features import FEATURES
+from monitor.health import PARTS, Status
+from monitor.ims import FAULT_FREQUENCIES
+from monitor.knowledge import Knowledge
+
+KNOWLEDGE = Knowledge.load()
+
+
+def write(tmp_path, text: str):
+    path = tmp_path / "knowledge.toml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_every_word_the_detector_reports_is_a_node():
+    reported = [*get_args(Status), *PARTS.values(), *FEATURES]
+
+    assert [word for word in reported if word not in KNOWLEDGE] == []
+
+
+def test_machine_facts_cite_the_fault_frequencies_the_detector_uses():
+    [geometry] = [f for f in KNOWLEDGE.machine() if f.id == "geometry"]
+    stated = {float(hz) for hz in re.findall(r"(\d+\.\d) Hz", geometry.text)}
+
+    computed = {round(hz, 1) for hz in vars(FAULT_FREQUENCIES).values()}
+
+    assert stated == computed
+
+
+def test_machine_facts_carry_their_full_source():
+    facts = KNOWLEDGE.machine()
+
+    assert {f.id for f in facts} >= {"rig", "load", "sampling", "design life"}
+    assert all(f.label == "Machine" for f in facts)
+    assert all("readme" in f.source or "Qiu" in f.source or "detector" in f.source for f in facts)
+
+
+def test_part_leads_to_its_damage_types_and_their_causes():
+    ids = [f.id for f in KNOWLEDGE.around(["outer race"])]
+
+    assert ids[0] == "outer race"
+    assert {"subsurface fatigue", "surface fatigue", "indentation"} <= set(ids)
+    assert {"end of life", "poor lubrication", "contamination"} <= set(ids)
+
+
+def test_lookup_stops_after_two_hops():
+    # env_bpfo -> outer race -> damage types; their causes would be a third hop.
+    ids = {f.id for f in KNOWLEDGE.around(["env_bpfo"])}
+
+    assert {"outer race", "subsurface fatigue"} <= ids
+    assert "end of life" not in ids
+
+
+def test_arrows_are_only_followed_forwards():
+    # Causes explain damage; they lead nowhere, so a cause alone reaches only itself.
+    assert [f.id for f in KNOWLEDGE.around(["contamination"])] == ["contamination"]
+
+
+def test_status_leads_to_its_rules_and_actions():
+    ids = [f.id for f in KNOWLEDGE.around(["danger"])]
+
+    assert {"danger rule", "act now", "check for secondary damage"} <= set(ids)
+    assert "plan the replacement" not in ids
+
+
+def test_overlapping_lookups_list_each_fact_once_nearest_first():
+    ids = [f.id for f in KNOWLEDGE.around(["alert", "danger"])]
+
+    assert len(ids) == len(set(ids))
+    assert ids[0] == "alert"
+
+
+def test_unknown_source_stops_loading(tmp_path):
+    path = write(
+        tmp_path,
+        '[sources]\na = "A"\n[[node]]\nid = "x"\nlabel = "Rule"\nsource = "b"\ntext = "t"\n',
+    )
+
+    with pytest.raises(ValueError, match="unknown source"):
+        Knowledge.load(path)
+
+
+def test_arrow_to_a_missing_node_stops_loading(tmp_path):
+    path = write(
+        tmp_path,
+        '[sources]\na = "A"\n[[node]]\nid = "x"\nlabel = "Rule"\nsource = "a"\ntext = "t"\n'
+        'out = { CAUSED_BY = ["y"] }\n',
+    )
+
+    with pytest.raises(ValueError, match="unknown node"):
+        Knowledge.load(path)

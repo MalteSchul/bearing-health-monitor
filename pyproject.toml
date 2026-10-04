@@ -13,6 +13,8 @@ dependencies = [
     "pandas>=2.2",
     "pyarrow>=17",
     "scikit-learn>=1.5",
+    "anthropic>=1.11.0",
+    "networkx>=3.7",
 ]
 
 [dependency-groups]
@@ -24,6 +26,7 @@ dev = [
     "pre-commit>=3.8",
     "httpx2>=2.13.1",
     "scipy-stubs>=1.18.1.1",
+    "types-networkx>=3.6.1.20260911",
 ]
 
 [build-system]

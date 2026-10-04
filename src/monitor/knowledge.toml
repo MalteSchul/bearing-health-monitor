@@ -1,0 +1,343 @@
+# What the copilot may know beyond the detector's numbers. Each node is one fact with its source.
+# `out` lists the arrows leaving a node, by relationship type; they point from what the detector
+# reports towards what explains it, so a lookup only ever follows them forwards.
+# Ids of statuses, parts and features are the detector's own words, so its output is a start node.
+# Never add what happened at the end of a run: that is hindsight, the detector never sees it either.
+
+[sources]
+ims-readme = "NASA IMS Bearing Data readme (J. Lee, H. Qiu, G. Yu, J. Lin, Rexnord Technical Services)"
+ims-checked = "NASA IMS Bearing Data readme, corrected after checking the data"
+qiu-2006 = "Qiu, Lee, Lin: Wavelet filter-based weak signature detection, J. Sound Vib. 289 (2006)"
+iso-15243 = "ISO 15243, Rolling bearings: damage and failures, terms, characteristics and causes"
+iso-20816 = "ISO 20816-1, Mechanical vibration: measurement and evaluation of machine vibration"
+skf-damage = "SKF, Bearing damage and failure analysis"
+textbook = "Randall, Vibration-based condition monitoring (2nd ed., 2021)"
+detector = "This monitor's detector"
+
+# --- The machine: sent with every question -----------------------------------------------------
+
+[[node]]
+id = "rig"
+label = "Machine"
+source = "ims-readme"
+text = "The test rig has four bearings on one shaft, driven at a constant 2,000 rpm by an AC motor via rub belts."
+
+[[node]]
+id = "load"
+label = "Machine"
+source = "ims-readme"
+text = "A spring mechanism applies a radial load of 6,000 lb (about 2.7 t) to the shaft; in the readme's figure it acts on bearings 2 and 3."
+
+[[node]]
+id = "bearing type"
+label = "Machine"
+source = "ims-readme"
+text = "All four bearings are Rexnord ZA-2115 double-row bearings with forced lubrication."
+
+[[node]]
+id = "geometry"
+label = "Machine"
+source = "qiu-2006"
+text = "Each row has 16 rollers. At 2,000 rpm a defect causes an impact at a fixed rate per part: outer race 236.4 Hz (BPFO), inner race 296.9 Hz (BPFI), roller spin 139.9 Hz (BSF, impacts at twice that), cage 14.8 Hz (FTF). All four bearings share these frequencies."
+
+[[node]]
+id = "sensors"
+label = "Machine"
+source = "ims-readme"
+text = "One accelerometer sits on each bearing housing (two per bearing, x and y, in set 1). The readme's figure also shows thermocouples, but the data contains no temperatures."
+
+[[node]]
+id = "sampling"
+label = "Machine"
+source = "ims-checked"
+text = "Every 10 minutes the rig records a 1-second vibration snapshot (every 5 minutes for the first 43 snapshots of set 1). The readme states 20 kHz, but each snapshot holds 20,480 samples and the fault frequencies only line up at 20,480 Hz, so that is the rate used."
+
+[[node]]
+id = "stops"
+label = "Machine"
+source = "ims-readme"
+text = "Longer gaps between snapshots mean the rig was stopped and restarted on the next working day; nothing is measured during a stop."
+
+[[node]]
+id = "design life"
+label = "Machine"
+source = "ims-readme"
+text = "The bearings' design life is more than 100 million revolutions, about 833 operating hours at 2,000 rpm."
+
+[[node]]
+id = "features"
+label = "Machine"
+source = "detector"
+text = "The monitor reduces each snapshot to 8 features per sensor: rms, peak, crest factor, kurtosis, and the envelope amplitude at each of the four fault frequencies."
+
+# --- Statuses: what each light means and asks for -----------------------------------------------
+
+[[node]]
+id = "baseline"
+label = "Status"
+source = "detector"
+text = "Learning (grey): the first 24 hours of a run are recorded as the bearing's reference; there is no judgement yet."
+out = { DECIDED_BY = ["baseline rule"] }
+
+[[node]]
+id = "ok"
+label = "Status"
+source = "detector"
+text = "OK (green): no feature has held at 2x its baseline for an hour on the bearing's own evidence; no action."
+out = { DECIDED_BY = ["health index rule", "alert rule"] }
+
+[[node]]
+id = "crosstalk"
+label = "Status"
+source = "detector"
+text = "Crosstalk (green with a note): the bearing's index is raised, but by a neighbour's fault that it hears through the shared shaft; no action on this bearing."
+out = { DECIDED_BY = ["crosstalk rule"], REQUIRES = ["follow the source"], SEE_ALSO = ["what and where"] }
+
+[[node]]
+id = "alert"
+label = "Status"
+source = "detector"
+text = "Alert (yellow): a fault on this bearing has been detected; plan the replacement."
+out = { DECIDED_BY = ["alert rule", "diagnosis rule"], REQUIRES = ["plan the replacement", "inspect every bearing"], LIMITED_BY = ["equal loudness"] }
+
+[[node]]
+id = "danger"
+label = "Status"
+source = "detector"
+text = "Danger (red): the damage is spreading; act now."
+out = { DECIDED_BY = ["danger rule", "diagnosis rule"], REQUIRES = ["act now", "check for secondary damage", "inspect every bearing"], LIMITED_BY = ["equal loudness"] }
+
+# --- How the detector decides -------------------------------------------------------------------
+
+[[node]]
+id = "baseline rule"
+label = "Rule"
+source = "detector"
+text = "Each bearing is compared with its own first 24 hours: the median of each feature in that time is its reference."
+
+[[node]]
+id = "health index rule"
+label = "Rule"
+source = "detector"
+text = "The health index is the largest of the bearing's 8 feature ratios to its reference; 1x means as on its first day. The feature behind it is the driver."
+
+[[node]]
+id = "alert rule"
+label = "Rule"
+source = "detector"
+text = "An alert is raised when the health index has held at 2x or more for one operating hour on the bearing's own evidence; a stop longer than 30 minutes restarts the hour. An alert stays until maintenance."
+
+[[node]]
+id = "danger rule"
+label = "Rule"
+source = "detector"
+text = "Danger is raised when an alerted bearing's rms, its overall vibration energy, has also held at 2x or more for one hour. Danger stays until maintenance."
+
+[[node]]
+id = "crosstalk rule"
+label = "Rule"
+source = "detector"
+text = "A raised index counts as crosstalk when another bearing shows the same strongest feature at least 3x louder over the last hour; those snapshots are not the bearing's own evidence."
+
+[[node]]
+id = "diagnosis rule"
+label = "Rule"
+source = "detector"
+text = "The diagnosed part comes from the envelope feature that stood out most over the last hour, if it reached 2x. Time-domain drivers name no part. When damage becomes widespread, every envelope feature rises and the diagnosed part becomes unreliable."
+
+[[node]]
+id = "equal loudness"
+label = "Rule"
+source = "detector"
+text = "When two bearings show the same fault about equally loud, loudness cannot tell which one is the source, so both are flagged; only an inspection decides."
+
+[[node]]
+id = "what and where"
+label = "Rule"
+source = "textbook"
+text = "All bearings of one type share the same fault frequencies, so a frequency tells which part is damaged, not which bearing; the sensor that hears it loudest points to the bearing."
+
+# --- Actions ------------------------------------------------------------------------------------
+
+[[node]]
+id = "plan the replacement"
+label = "Action"
+source = "iso-20816"
+text = "Plan the replacement: order the bearing and schedule the change for the next planned stop; keep the machine running and monitored meanwhile."
+
+[[node]]
+id = "act now"
+label = "Action"
+source = "iso-20816"
+text = "Act now: reduce the load or stop as soon as it is safe, and replace the bearing; running on risks damage to the shaft, housing and neighbouring parts."
+
+[[node]]
+id = "check for secondary damage"
+label = "Action"
+source = "skf-damage"
+text = "When replacing a damaged bearing, check the shaft and housing seats, the seals and the lubricant for damage and debris, and keep the old bearing for failure analysis."
+
+[[node]]
+id = "inspect every bearing"
+label = "Action"
+source = "skf-damage"
+text = "One stop gives access to every bearing on the shaft: inspect the neighbours too, especially any that show the same signal."
+
+[[node]]
+id = "follow the source"
+label = "Action"
+source = "detector"
+text = "For a bearing that only hears a neighbour, act on the source bearing and check this one again once the source has been repaired."
+
+# --- Parts and how a defect on each shows --------------------------------------------------------
+
+[[node]]
+id = "outer race"
+label = "Component"
+source = "textbook"
+text = "Outer race: a defect on it is struck by every passing roller, at BPFO (236.4 Hz here), measured by the env_bpfo feature. The outer race does not rotate, so the defect stays in the load zone and shows clearly."
+out = { DAMAGED_BY = ["subsurface fatigue", "surface fatigue", "indentation", "abrasive wear"] }
+
+[[node]]
+id = "inner race"
+label = "Component"
+source = "textbook"
+text = "Inner race: a defect on it is struck at BPFI (296.9 Hz here), measured by env_bpfi. It rotates with the shaft through the load zone, so its impacts vary in strength and are often weaker at the sensor; impulsiveness (peak, kurtosis) can show it first."
+out = { DAMAGED_BY = ["subsurface fatigue", "surface fatigue", "indentation", "abrasive wear"] }
+
+[[node]]
+id = "roller element"
+label = "Component"
+source = "textbook"
+text = "Roller: a defect on a roller strikes both races once per roller spin, at twice BSF (2 x 139.9 Hz), measured by env_bsf. It passes the load zone once per cage turn, so it often also shows at the cage frequency."
+out = { DAMAGED_BY = ["subsurface fatigue", "surface fatigue", "indentation", "abrasive wear"] }
+
+[[node]]
+id = "cage"
+label = "Component"
+source = "textbook"
+text = "Cage: the cage holds the rollers apart and turns at FTF (14.8 Hz here), measured by env_ftf. A raised cage signal can come from cage damage or from a roller defect."
+out = { DAMAGED_BY = ["cage damage"] }
+
+# --- What the detector's features mean when they drive the index -------------------------------
+
+[[node]]
+id = "rms"
+label = "Feature"
+source = "textbook"
+text = "rms is the overall vibration energy. It rises when damage spreads, but also for causes outside the bearing such as unbalance, misalignment or looseness."
+
+[[node]]
+id = "peak"
+label = "Feature"
+source = "textbook"
+text = "peak is the largest single value in a snapshot; it rises with isolated impacts, as from a local defect."
+
+[[node]]
+id = "crest_factor"
+label = "Feature"
+source = "textbook"
+text = "Crest factor is peak divided by rms; it is high when a few impacts stand out from the background, typical of early, localised damage."
+
+[[node]]
+id = "kurtosis"
+label = "Feature"
+source = "textbook"
+text = "Kurtosis measures how impulsive the vibration is (3 for plain noise). It rises with early, localised damage and can fall back when the damage becomes widespread, so a falling value is no sign of recovery."
+
+[[node]]
+id = "env_bpfo"
+label = "Feature"
+source = "textbook"
+text = "env_bpfo is the envelope amplitude at the outer-race fault frequency: repeated impacts on an outer race raise it."
+out = { POINTS_TO = ["outer race"] }
+
+[[node]]
+id = "env_bpfi"
+label = "Feature"
+source = "textbook"
+text = "env_bpfi is the envelope amplitude at the inner-race fault frequency: repeated impacts on an inner race raise it."
+out = { POINTS_TO = ["inner race"] }
+
+[[node]]
+id = "env_bsf"
+label = "Feature"
+source = "textbook"
+text = "env_bsf is the envelope amplitude at the roller fault frequency: a defect on a roller raises it."
+out = { POINTS_TO = ["roller element"] }
+
+[[node]]
+id = "env_ftf"
+label = "Feature"
+source = "textbook"
+text = "env_ftf is the envelope amplitude at the cage frequency: cage damage or a roller defect raises it."
+out = { POINTS_TO = ["cage"] }
+
+# --- Damage types (ISO 15243 terms) and what to look for -----------------------------------------
+
+[[node]]
+id = "subsurface fatigue"
+label = "FailureMode"
+source = "iso-15243"
+text = "Subsurface-initiated fatigue: after many load cycles, cracks start below the surface and material flakes off (spalling). The most common end of a bearing's life; look for flaked areas in the load zone, and expect the spall to grow."
+out = { CAUSED_BY = ["end of life", "overload", "misalignment"] }
+
+[[node]]
+id = "surface fatigue"
+label = "FailureMode"
+source = "iso-15243"
+text = "Surface-initiated fatigue: with too thin a lubricant film the surfaces touch, and micro-cracks and small spalls start at the surface; look for grey, matt bands on the raceway."
+out = { CAUSED_BY = ["poor lubrication", "contamination"] }
+
+[[node]]
+id = "indentation"
+label = "FailureMode"
+source = "iso-15243"
+text = "Indentation by debris: hard particles rolled over leave dents, which become starting points for fatigue; look for small dents with raised edges."
+out = { CAUSED_BY = ["contamination"] }
+
+[[node]]
+id = "abrasive wear"
+label = "FailureMode"
+source = "iso-15243"
+text = "Abrasive wear: fine particles in the lubricant wear the surfaces away; clearance grows and the surfaces turn dull."
+out = { CAUSED_BY = ["contamination", "poor lubrication"] }
+
+[[node]]
+id = "cage damage"
+label = "FailureMode"
+source = "skf-damage"
+text = "Cage wear or fracture: look for worn roller pockets or cracks; it usually follows poor lubrication, misalignment or damaged rollers."
+out = { CAUSED_BY = ["poor lubrication", "misalignment"] }
+
+# --- Causes and what to check -------------------------------------------------------------------
+
+[[node]]
+id = "end of life"
+label = "Cause"
+source = "skf-damage"
+text = "Normal fatigue: every bearing eventually fails by fatigue once its life is used up, even when operated correctly; then the replacement is routine."
+
+[[node]]
+id = "overload"
+label = "Cause"
+source = "skf-damage"
+text = "Overload: load above what the bearing was selected for; check the actual load and any change in the process."
+
+[[node]]
+id = "misalignment"
+label = "Cause"
+source = "skf-damage"
+text = "Misalignment: shaft and housing out of line load the raceway edges; check the alignment when replacing."
+
+[[node]]
+id = "poor lubrication"
+label = "Cause"
+source = "skf-damage"
+text = "Poor lubrication: too little, wrong or aged lubricant; check the oil supply, flow and condition."
+
+[[node]]
+id = "contamination"
+label = "Cause"
+source = "skf-damage"
+text = "Contamination: particles or water in the lubricant; check the filters and seals and have the oil analysed."
