@@ -304,11 +304,6 @@ button {
   font-size: 14px;
 }
 
-/* Brought into view after a click, clear of the sticky bar. */
-#detail {
-  scroll-margin-top: 80px;
-}
-
 #run-result {
   margin: 8px 0 0;
   font-size: 14px;

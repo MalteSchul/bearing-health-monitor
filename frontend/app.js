@@ -259,7 +259,7 @@ function buildCard(bearing) {
   card.className = "card";
   card.dataset.bearing = String(bearing);
   // A toggle: pressing the selected card again releases it, back to the whole rig.
-  card.addEventListener("click", handle(() => pickBearing(bearing === state.bearing ? null : bearing)));
+  card.addEventListener("click", handle(() => selectBearing(bearing === state.bearing ? null : bearing)));
   card.innerHTML = `
     <span class="card-head">
       <span class="name">Bearing ${bearing}</span>
@@ -896,7 +896,7 @@ function watchLaneClicks() {
       const moved = Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY);
       press = null;
       const bearing = laneAt(event);
-      if (moved <= 4 && bearing !== state.bearing) handle(() => pickBearing(bearing))();
+      if (moved <= 4 && bearing !== state.bearing) handle(() => selectBearing(bearing))();
     },
     true,
   );
@@ -1105,15 +1105,6 @@ async function selectBearing(bearing) {
     });
   }
   listen("overview-chart", { plotly_relayout: followDrag("overview-chart") });
-}
-
-/**
- * A selection by click, which also brings the detail into view: it sits below the overview, out of
- * sight from the cards. Loading a run or a link selects without scrolling.
- */
-async function pickBearing(bearing) {
-  await selectBearing(bearing);
-  if (bearing !== null) $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // --- copilot ----------------------------------------------------------------------------------
