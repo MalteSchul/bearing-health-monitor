@@ -72,6 +72,7 @@ const VEIL = "rgba(246, 245, 241, 0.78)";
 // machine: the rig's condition as of the moment shown, its worst bearing's.
 // health: each bearing's health-index series of the current run, which the overview draws.
 // evaluation: the run's verdicts against the documented end, hindsight whatever the moment.
+// bearing: the one shown in detail and in the copilot's focus, null for the whole rig.
 // moment: index of the snapshot shown, null for the latest.
 // range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
 // asked: question, run, moment and bearing of the copilot answer on show, null before the first.
@@ -141,7 +142,8 @@ function renderRuns(experiments) {
 
 /** Run, bearing and moment in the address, so a view can be bookmarked and shared. */
 function remember() {
-  const params = new URLSearchParams({ run: state.run, bearing: state.bearing });
+  const params = new URLSearchParams({ run: state.run });
+  if (state.bearing !== null) params.set("bearing", state.bearing);
   if (state.moment !== null) params.set("at", runTimes()[state.moment]);
   history.replaceState(null, "", `?${params}`);
 }
@@ -190,7 +192,7 @@ async function selectRun(name, bearing = state.bearing, at = null) {
     `${experiment.snapshots.toLocaleString("en")} one-second vibration snapshots`;
 
   const numbers = experiment.bearings.map((b) => b.bearing);
-  await selectBearing(numbers.includes(bearing) ? bearing : numbers[0]);
+  await selectBearing(numbers.includes(bearing) ? bearing : null);
 }
 
 // --- hindsight --------------------------------------------------------------------------------
@@ -247,7 +249,8 @@ function buildCard(bearing) {
   const card = document.createElement("button");
   card.className = "card";
   card.dataset.bearing = String(bearing);
-  card.addEventListener("click", handle(() => selectBearing(bearing)));
+  // A toggle: pressing the selected card again releases it, back to the whole rig.
+  card.addEventListener("click", handle(() => selectBearing(bearing === state.bearing ? null : bearing)));
   card.innerHTML = `
     <span class="card-head">
       <span class="name">Bearing ${bearing}</span>
@@ -1053,49 +1056,62 @@ function listen(id, handlers) {
   }
 }
 
+/** Shows one bearing in detail, or with null the whole rig. The selection is the copilot's focus. */
 async function selectBearing(bearing) {
-  const ratios = await getJSON(`${API}/experiments/${state.run}/bearings/${bearing}/ratios`);
+  const ratios = bearing === null ? null : await getJSON(`${API}/experiments/${state.run}/bearings/${bearing}/ratios`);
   state.bearing = bearing;
   remember();
   renderCards();
   markRange();
+  renderScope();
 
-  const summary = state.bearings.find((b) => b.bearing === bearing);
   $("copilot").hidden = false;
-  $("ask-scope").textContent =
-    `About the moment shown, with bearing ${bearing} in focus · answers only from looked-up facts, each cited`;
   // Shown before drawing: Plotly sizes a chart from its container.
   $("overview").hidden = false;
   $("overview-title").textContent = `${runLabel(state.run)} · all bearings`;
-  $("detail").hidden = false;
-  $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
-
-  await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
+  $("detail").hidden = bearing === null;
+  if (bearing === null) {
+    // Gone rather than hidden, so the replay and the time range leave it alone.
+    Plotly.purge("chart");
+    await drawOverview();
+  } else {
+    $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
+    const summary = state.bearings.find((b) => b.bearing === bearing);
+    await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
+    listen("chart", {
+      plotly_relayout: followDrag("chart"),
+      plotly_legendclick: featuresOnly,
+      plotly_legenddoubleclick: featuresOnly,
+    });
+  }
   listen("overview-chart", { plotly_relayout: followDrag("overview-chart") });
-  listen("chart", {
-    plotly_relayout: followDrag("chart"),
-    plotly_legendclick: featuresOnly,
-    plotly_legenddoubleclick: featuresOnly,
-  });
 }
 
 // --- copilot ----------------------------------------------------------------------------------
 
-// A click asks: nothing is asked on its own, since every answer is a paid model call.
+// A click asks: nothing is asked on its own, since every answer is a paid model call. "This
+// bearing" means nothing for the whole rig, so that one needs a bearing selected.
 const SUGGESTIONS = [
-  "Which bearing is the problem?",
-  "What is wrong with this bearing?",
-  "Is it getting worse?",
-  "What should I do now?",
+  { text: "Which bearing is the problem?", needsBearing: false },
+  { text: "What is wrong with this bearing?", needsBearing: true },
+  { text: "Is it getting worse?", needsBearing: false },
+  { text: "What should I do now?", needsBearing: false },
 ];
 const CITATION = /\[(\d+)\]/;
 
-function renderSuggestions() {
+/** What a question is about: the selected bearing, or the whole rig. Follows the selection. */
+function renderScope() {
+  $("ask-scope").textContent =
+    state.bearing === null
+      ? "About the whole rig at the moment shown · click a card to ask about one bearing · answers only from looked-up facts, each cited"
+      : `About the moment shown, with bearing ${state.bearing} in focus · click its card again for the whole rig · answers only from looked-up facts, each cited`;
+  const fitting = SUGGESTIONS.filter((s) => state.bearing !== null || !s.needsBearing);
   $("suggestions").replaceChildren(
-    ...SUGGESTIONS.map((text) => {
+    ...fitting.map(({ text }) => {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = text;
+      button.disabled = $("ask-button").disabled;
       button.addEventListener("click", () => {
         $("question").value = text;
         ask();
@@ -1116,8 +1132,8 @@ function setStatus(text, error = false) {
 }
 
 /**
- * Asks about the moment shown, with the selected bearing in focus. A running replay stops first,
- * so the answer and the dashboard stay on the same moment.
+ * Asks about the moment shown, with the selected bearing in focus, or none for the whole rig. A
+ * running replay stops first, so the answer and the dashboard stay on the same moment.
  */
 async function ask() {
   const question = $("question").value.trim();
@@ -1209,10 +1225,8 @@ function renderReply(reply) {
   const asked = document.createElement("strong");
   asked.textContent = `“${question}”`;
   const end = moment === null ? " (latest)" : "";
-  $("reply-label").replaceChildren(
-    asked,
-    ` · ${runLabel(run)} as of ${formatTime(time)}${end} · bearing ${bearing} in focus`,
-  );
+  const scope = bearing === null ? "whole rig" : `bearing ${bearing} in focus`;
+  $("reply-label").replaceChildren(asked, ` · ${runLabel(run)} as of ${formatTime(time)}${end} · ${scope}`);
   $("answer").hidden = reply.answer === null;
   $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, ids)));
   $("answer-note").textContent = reply.note ?? "";
@@ -1245,7 +1259,6 @@ async function start() {
     event.preventDefault();
     ask();
   });
-  renderSuggestions();
   watchLaneClicks();
   // Dragging the slider takes over from a running replay.
   $("moment").addEventListener("input", (event) => {
@@ -1261,7 +1274,9 @@ async function start() {
   const params = new URLSearchParams(location.search);
   const names = experiments.map((e) => e.name);
   const run = names.includes(params.get("run")) ? params.get("run") : names[0];
-  await selectRun(run, Number(params.get("bearing")), params.get("at"));
+  // Without a bearing in the address, the page opens on the whole rig: the machine first.
+  const bearing = params.has("bearing") ? Number(params.get("bearing")) : null;
+  await selectRun(run, bearing, params.get("at"));
 }
 
 handle(start)();

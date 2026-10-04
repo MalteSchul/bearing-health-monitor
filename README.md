@@ -46,7 +46,7 @@ Run `just` to list all recipes.
   `src/monitor/knowledge.toml`). Needs `ANTHROPIC_API_KEY` in the environment or in `.env`
   (copy `.env.example`); without it, only the facts
 - `frontend/`: static dashboard, served by the API at `/`. `?run=set2&bearing=1&at=2004-02-16T04:12:39`
-  opens a replay at that moment. The directory is configurable
+  opens a replay at that moment; without `bearing` it shows the whole rig. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.
 - `data/processed/`: precomputed features shipped with the image. Raw data is never committed.
