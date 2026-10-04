@@ -14,7 +14,8 @@ qiu-2006 = "Qiu, Lee, Lin: Wavelet filter-based weak signature detection, J. Sou
 iso-15243 = "ISO 15243, Rolling bearings: damage and failures, terms, characteristics and causes"
 # The standard grades vibration in zones and says what each zone allows; the actions are ours.
 iso-20816-zones = "This monitor's actions, modelled on evaluation zones C and D of ISO 20816-1 (Mechanical vibration: measurement and evaluation of machine vibration)"
-skf-damage = "SKF, Bearing damage and failure analysis"
+# Common maintenance practice in our own words, not taken from one publication.
+practice = "General maintenance practice, as written for this monitor"
 textbook = "Randall, Vibration-based condition monitoring (2nd ed., 2021)"
 detector = "This monitor's detector"
 
@@ -198,13 +199,13 @@ out = { SCHEDULED_BY = ["one stop"] }
 [[node]]
 id = "check for secondary damage"
 label = "Action"
-source = "skf-damage"
+source = "practice"
 text = "When replacing a damaged bearing, check the shaft and housing seats, the seals and the lubricant for damage and debris, and keep the old bearing for failure analysis."
 
 [[node]]
 id = "inspect every bearing"
 label = "Action"
-source = "skf-damage"
+source = "practice"
 text = "One stop gives access to every bearing on the shaft: inspect the neighbours too, especially any that show the same signal."
 
 [[node]]
@@ -331,7 +332,7 @@ out = { CAUSED_BY = ["contamination", "poor lubrication"] }
 [[node]]
 id = "cage damage"
 label = "FailureMode"
-source = "skf-damage"
+source = "practice"
 text = "Cage wear or fracture: look for worn roller pockets or cracks; it usually follows poor lubrication, misalignment or damaged rollers."
 out = { CAUSED_BY = ["poor lubrication", "misalignment", "roller element"] }
 
@@ -340,29 +341,29 @@ out = { CAUSED_BY = ["poor lubrication", "misalignment", "roller element"] }
 [[node]]
 id = "end of life"
 label = "Cause"
-source = "skf-damage"
+source = "practice"
 text = "Normal fatigue: every bearing eventually fails by fatigue once its life is used up, even when operated correctly; then the replacement is routine."
 
 [[node]]
 id = "overload"
 label = "Cause"
-source = "skf-damage"
+source = "practice"
 text = "Overload: load above what the bearing was selected for; check the actual load and any change in the process."
 
 [[node]]
 id = "misalignment"
 label = "Cause"
-source = "skf-damage"
+source = "practice"
 text = "Misalignment: shaft and housing out of line load the raceway edges; check the alignment when replacing."
 
 [[node]]
 id = "poor lubrication"
 label = "Cause"
-source = "skf-damage"
+source = "practice"
 text = "Poor lubrication: too little, wrong or aged lubricant; check the oil supply, flow and condition."
 
 [[node]]
 id = "contamination"
 label = "Cause"
-source = "skf-damage"
+source = "practice"
 text = "Contamination: particles or water in the lubricant; check the filters and seals and have the oil analysed."
