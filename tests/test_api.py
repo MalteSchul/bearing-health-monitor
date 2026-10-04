@@ -219,6 +219,18 @@ def test_condition_as_of_a_time_shows_what_was_known_then(tmp_path):
     assert (raised["status"], raised["as_of"]) == ("alert", ALERT_AT.isoformat())
 
 
+def test_experiment_reports_its_machine_as_of_a_time(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    def machine(at=None):
+        params = {} if at is None else {"at": at.isoformat()}
+        return client.get("/api/v1/experiments/set2", params=params).json()["machine"]
+
+    assert machine(START + timedelta(hours=12)) == {"status": "baseline", "bearings": [1, 2]}
+    assert machine(FAULT_FROM + timedelta(minutes=30)) == {"status": "ok", "bearings": []}
+    assert machine() == {"status": "alert", "bearings": [1]}
+
+
 def test_at_applies_to_the_experiment_and_its_bearings_list(tmp_path):
     client = make_client(frontend_dir=tmp_path)
     at = {"at": (FAULT_FROM + timedelta(minutes=30)).isoformat()}

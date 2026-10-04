@@ -87,6 +87,30 @@ class History:
         return self.conditions[i - 1] if i else None
 
 
+# A bearing that only hears a neighbour needs no action, so crosstalk counts as ok here.
+MachineStatus = Literal["baseline", "ok", "alert", "danger"]
+# Most urgent first. A known danger outranks a bearing still learning; not knowing outranks ok.
+ESCALATION: tuple[MachineStatus, ...] = ("danger", "alert", "baseline")
+
+
+@dataclass(frozen=True)
+class MachineCondition:
+    status: MachineStatus
+    # The bearings at that status; none when the machine is ok.
+    bearings: list[int]
+
+
+def machine_condition(conditions: dict[int, Condition]) -> MachineCondition:
+    """The machine is as bad as its worst bearing: it is stopped and repaired as a whole, and an
+    average would let healthy bearings hide a failing one.
+    """
+    for status in ESCALATION:
+        bearings = sorted(b for b, c in conditions.items() if c.status == status)
+        if bearings:
+            return MachineCondition(status=status, bearings=bearings)
+    return MachineCondition(status="ok", bearings=[])
+
+
 def bearing_ratios(run: pd.DataFrame) -> pd.DataFrame:
     """Each feature as a multiple of its baseline median, indexed by (bearing, timestamp).
 

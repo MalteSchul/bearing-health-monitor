@@ -69,6 +69,7 @@ const VEIL = "rgba(246, 245, 241, 0.78)";
 
 // bearings: each bearing's condition at the end of the run, which the charts mark.
 // cards: each bearing's condition as of the moment shown, which the cards report.
+// machine: the rig's condition as of the moment shown, its worst bearing's.
 // health: each bearing's health-index series of the current run, which the overview draws.
 // evaluation: the run's verdicts against the documented end, hindsight whatever the moment.
 // moment: index of the snapshot shown, null for the latest.
@@ -79,6 +80,7 @@ const state = {
   bearing: null,
   bearings: [],
   cards: [],
+  machine: null,
   health: {},
   evaluation: null,
   moment: null,
@@ -147,7 +149,7 @@ const runTimes = () => state.health[state.bearings[0].bearing].timestamps;
 
 async function selectRun(name, bearing = state.bearing, at = null) {
   playing = false;
-  cardsRequest?.abort();
+  momentRequest?.abort();
   const experiment = await getJSON(`${API}/experiments/${name}`);
   const [evaluation, ...series] = await Promise.all([
     getJSON(`${API}/experiments/${name}/evaluation`),
@@ -167,10 +169,13 @@ async function selectRun(name, bearing = state.bearing, at = null) {
   const last = times.length - 1;
   const index = at === null ? last : Math.max(0, times.findLastIndex((time) => time <= at));
   state.moment = index >= last ? null : index;
-  state.cards =
+  const shown =
     state.moment === null
-      ? experiment.bearings
-      : (await getJSON(`${API}/experiments/${name}?at=${encodeURIComponent(times[index])}`)).bearings;
+      ? experiment
+      : await getJSON(`${API}/experiments/${name}?at=${encodeURIComponent(times[index])}`);
+  state.cards = shown.bearings;
+  state.machine = shown.machine;
+  renderMachine();
   $("moment").max = String(last);
   $("moment").value = String(index);
   markMoment();
@@ -935,8 +940,8 @@ function featuresOnly(event) {
 // --- replay -----------------------------------------------------------------------------------
 
 let playing = false;
-// The cards' request in flight: a newer moment cancels it, so an old answer never lands last.
-let cardsRequest = null;
+// The moment's request in flight: a newer moment cancels it, so an old answer never lands last.
+let momentRequest = null;
 
 /** What the bar says about the moment shown. */
 function markMoment() {
@@ -970,20 +975,28 @@ function moveVeil() {
   );
 }
 
-/** The cards as of the moment shown, through the same `?at=` any API client would use. */
-async function loadCards() {
-  cardsRequest?.abort();
-  if (state.moment === null) {
-    state.cards = state.bearings;
-    renderCards();
-    return;
-  }
+/** The rig's one light: its worst status, and for an alert or danger which bearings have it. */
+function renderMachine() {
+  const { status, bearings } = state.machine;
+  const named = status === "alert" || status === "danger";
+  const which = named ? ` · bearing${bearings.length > 1 ? "s" : ""} ${listed(bearings)}` : "";
+  const pill = $("machine").querySelector(".pill");
+  pill.style.setProperty("--status", STATUS[status].colour);
+  pill.textContent = `${STATUS[status].label}${which}`;
+}
+
+/** The cards and the rig's light as of the moment shown, through the same `?at=` any client uses. */
+async function loadMoment() {
+  momentRequest?.abort();
   const request = new AbortController();
-  cardsRequest = request;
-  const at = encodeURIComponent(runTimes()[state.moment]);
+  momentRequest = request;
+  const at = state.moment === null ? "" : `?at=${encodeURIComponent(runTimes()[state.moment])}`;
   try {
-    state.cards = (await getJSON(`${API}/experiments/${state.run}?at=${at}`, request.signal)).bearings;
+    const shown = await getJSON(`${API}/experiments/${state.run}${at}`, request.signal);
+    state.cards = shown.bearings;
+    state.machine = shown.machine;
     renderCards();
+    renderMachine();
   } catch (error) {
     if (error.name !== "AbortError") throw error;
   }
@@ -994,7 +1007,7 @@ async function showMoment(index) {
   $("moment").value = String(index);
   markMoment();
   remember();
-  await Promise.all([moveVeil(), loadCards()]);
+  await Promise.all([moveVeil(), loadMoment()]);
 }
 
 /** Steps through the run from where the slider is, or from its start when at the end. */

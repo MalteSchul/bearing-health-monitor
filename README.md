@@ -32,7 +32,8 @@ Run `just` to list all recipes.
 - `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing and its condition; every
   shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too.
-  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time
+  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time. An experiment
+  also reports its `machine`: the worst bearing's status and which bearings have it
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
   per snapshot: `baseline`, `ok`, `crosstalk`, `alert` (plan the replacement), `danger` (act now)

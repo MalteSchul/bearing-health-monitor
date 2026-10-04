@@ -11,6 +11,7 @@ from monitor.health import (
     bearing_ratios,
     health_index,
     held,
+    machine_condition,
 )
 
 START = pd.Timestamp("2004-02-12 10:00")
@@ -305,6 +306,27 @@ def test_every_condition_depends_only_on_the_data_up_to_it():
     for cut in frame["timestamp"].drop_duplicates()[::6]:
         for history in assess(frame[frame["timestamp"] <= cut]):
             assert history.conditions[-1] == full[history.bearing].at(cut), cut
+
+
+def machine(*statuses: str) -> tuple[str, list[int]]:
+    """The machine's status and bearings, for bearings 1, 2, ... with these statuses."""
+    conditions = {b: Condition(as_of=START, status=s) for b, s in enumerate(statuses, start=1)}
+    result = machine_condition(conditions)
+    return result.status, result.bearings
+
+
+def test_machine_is_as_bad_as_its_worst_bearing():
+    assert machine("ok", "alert", "danger", "danger") == ("danger", [3, 4])
+    assert machine("ok", "alert", "crosstalk", "ok") == ("alert", [2])
+
+
+def test_a_bearing_that_only_hears_a_neighbour_leaves_the_machine_ok():
+    assert machine("ok", "crosstalk", "ok", "crosstalk") == ("ok", [])
+
+
+def test_machine_is_not_ok_while_a_bearing_is_still_learning():
+    assert machine("baseline", "ok") == ("baseline", [1])
+    assert machine("baseline", "danger") == ("danger", [2])
 
 
 def test_run_with_a_missing_bearing_row_is_rejected():

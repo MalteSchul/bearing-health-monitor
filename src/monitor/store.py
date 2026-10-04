@@ -14,10 +14,12 @@ from monitor.health import (
     THRESHOLD,
     Condition,
     History,
+    MachineCondition,
     Status,
     Timestamp,
     assess,
     bearing_ratios,
+    machine_condition,
 )
 from monitor.ims import EXPERIMENTS
 
@@ -38,6 +40,8 @@ class ExperimentSummary(BaseModel):
     first: Timestamp
     last: Timestamp
     snapshots: int
+    # The test rig as a whole, as of the same moment as its bearings.
+    machine: MachineCondition
     bearings: list[BearingSummary]
 
 
@@ -166,12 +170,14 @@ def _bearing_summary(bearing: int, data: _Bearing, at: datetime | None) -> Beari
 
 
 def _experiment_summary(name: str, run: _Run, at: datetime | None = None) -> ExperimentSummary:
+    bearings = [_bearing_summary(bearing, data, at) for bearing, data in run.bearings.items()]
     return ExperimentSummary(
         name=name,
         first=run.first,
         last=run.last,
         snapshots=run.snapshots,
-        bearings=[_bearing_summary(bearing, data, at) for bearing, data in run.bearings.items()],
+        machine=machine_condition({b.bearing: b.condition for b in bearings}),
+        bearings=bearings,
     )
 
 
