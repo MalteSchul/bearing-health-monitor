@@ -6,13 +6,14 @@ const API = "/api/v1";
 
 // A colour is an action: grey wait, green nothing, amber plan the replacement, red act now.
 // Crosstalk is green because this bearing needs nothing; its band shows why the index is high.
-// band: legend name of the shading behind the health index, null for none.
+// band: legend name of the shading behind the health index, null for none. Shades get stronger
+// with urgency, so on a washed-out projector danger still stands out and learning recedes.
 const STATUS = {
-  baseline: { label: "Learning", band: "learning", colour: "#8a8983", shade: "rgba(138, 137, 131, 0.22)" },
+  baseline: { label: "Learning", band: "learning", colour: "#8a8983", shade: "rgba(138, 137, 131, 0.13)" },
   ok: { label: "OK", band: null, colour: "#2e9d5b", shade: null },
-  crosstalk: { label: "OK", band: "crosstalk", colour: "#2e9d5b", shade: "rgba(46, 157, 91, 0.14)" },
-  alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.2)" },
-  danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.13)" },
+  crosstalk: { label: "OK", band: "crosstalk", colour: "#2e9d5b", shade: "rgba(46, 157, 91, 0.24)" },
+  alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.28)" },
+  danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.32)" },
 };
 
 const ENVELOPE = {
