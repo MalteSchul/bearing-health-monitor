@@ -22,16 +22,27 @@
   </header>
 
   <main>
-    <p id="run-info" class="muted"></p>
+    <!-- Stays in view while scrolling: the time range scopes both charts below. -->
+    <div id="run-bar">
+      <p id="run-info" class="muted"></p>
+      <div class="segmented" role="group" aria-label="Time range">
+        <button id="zoom-all" aria-pressed="true">Whole run</button>
+        <button id="zoom-final" aria-pressed="false">Final 100 h</button>
+      </div>
+    </div>
     <section id="bearings" class="grid" aria-label="Bearings"></section>
 
-    <section id="detail" hidden>
-      <div class="detail-head">
+    <section id="overview" class="panel" hidden>
+      <div class="panel-head">
+        <h2 id="overview-title"></h2>
+        <p class="muted">Health index and status on one scale · click a lane for its features</p>
+      </div>
+      <div id="overview-chart"></div>
+    </section>
+
+    <section id="detail" class="panel" hidden>
+      <div class="panel-head">
         <h2 id="detail-title"></h2>
-        <div class="segmented" role="group" aria-label="Time range">
-          <button id="zoom-all" aria-pressed="true">Whole run</button>
-          <button id="zoom-final" aria-pressed="false">Final 100 h</button>
-        </div>
       </div>
       <div id="chart"></div>
     </section>

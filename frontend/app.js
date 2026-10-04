@@ -56,9 +56,15 @@ const DOMAINS = [
   [0.34, 0.58],
   [0, 0.24],
 ];
+// Both charts keep the same side margins, so a moment sits at the same x in each.
+const MARGIN = { l: 52, r: 190, t: 34, b: 36 };
+// Overview lanes in pixels, so every run's overview looks alike whatever its bearing count.
+const LANE_PX = 80;
+const LANE_GAP_PX = 30;
 
-// range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in the chart.
-const state = { run: null, last: null, bearing: null, bearings: [], range: null };
+// range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
+// health: each bearing's health-index series of the current run, which the overview draws.
+const state = { run: null, last: null, bearing: null, bearings: [], health: {}, range: null };
 
 const $ = (id) => document.getElementById(id);
 
@@ -115,11 +121,15 @@ function remember() {
 
 async function selectRun(name, bearing = state.bearing) {
   const experiment = await getJSON(`${API}/experiments/${name}`);
+  const series = await Promise.all(
+    experiment.bearings.map((b) => getJSON(`${API}/experiments/${name}/bearings/${b.bearing}/health-index`)),
+  );
   // "Final 100 h" means the same in every run; a dragged range does not.
   if (name !== state.run && state.range !== "final") state.range = null;
   state.run = name;
   state.last = experiment.last;
   state.bearings = experiment.bearings;
+  state.health = Object.fromEntries(series.map((health) => [health.bearing, health]));
   for (const button of $("runs").children) {
     button.setAttribute("aria-pressed", String(button.dataset.run === name));
   }
@@ -217,7 +227,7 @@ const duration = (ms) =>
  * holds until the next snapshot, across a stop too, as `?at=` answers; only the index line breaks
  * there, because nothing was measured.
  */
-function statusShapes(timestamps, status) {
+function statusShapes(timestamps, status, axis = "y") {
   const shapes = [];
   let first = 0;
   for (let i = 1; i <= status.length; i += 1) {
@@ -228,7 +238,7 @@ function statusShapes(timestamps, status) {
           type: "rect",
           layer: "below",
           xref: "x",
-          yref: "y domain",
+          yref: `${axis} domain`,
           x0: timestamps[first],
           x1: timestamps[end ? i - 1 : i],
           y0: 0,
@@ -243,8 +253,7 @@ function statusShapes(timestamps, status) {
   return shapes;
 }
 
-function logAxis(domain) {
-  const ticks = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
+function logAxis(domain, ticks = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]) {
   return {
     domain,
     type: "log",
@@ -257,6 +266,118 @@ function logAxis(domain) {
     zeroline: false,
     tickfont: { color: MUTED },
   };
+}
+
+/** The time axis of both charts: long stops cut out, the same range in each. */
+function timeAxis(cuts, anchor) {
+  const range = state.range === "final" ? finalPhase() : state.range;
+  return {
+    type: "date",
+    anchor,
+    // A minute of margin on both sides of a cut keeps the line ends visible.
+    rangebreaks: cuts.map((stop) => ({
+      values: [isoAt(millis(stop.from) + 60000)],
+      dvalue: stop.ms - 120000,
+    })),
+    showline: true,
+    linecolor: "#c9c7be",
+    // Room below the axis line for the // marks.
+    ticklabelstandoff: 8,
+    hoverformat: "%Y-%m-%d %H:%M",
+    nticks: 9,
+    tickangle: 0,
+    tickformatstops: [
+      { dtickrange: [null, 86400000], value: "%b %d %H:%M" },
+      { dtickrange: [86400000, null], value: "%b %d" },
+    ],
+    gridcolor: GRID,
+    tickfont: { color: MUTED },
+    showspikes: true,
+    spikemode: "across",
+    spikesnap: "cursor",
+    spikethickness: 1,
+    spikedash: "solid",
+    spikecolor: "#a9a8a1",
+    ...(range ? { range, autorange: false } : { autorange: true }),
+  };
+}
+
+/** A dashed line at the alert threshold, across one panel or lane. */
+function thresholdShape(threshold, axis) {
+  return {
+    type: "line",
+    xref: "paper",
+    yref: axis,
+    x0: 0,
+    x1: 1,
+    y0: threshold,
+    y1: threshold,
+    line: { color: MUTED, width: 1, dash: "dash" },
+  };
+}
+
+/** A vertical line at each moment, over the full height of one panel or lane. */
+function momentShapes(moments, axis) {
+  return moments.map((moment) => ({
+    type: "line",
+    layer: moment.layer ?? "above",
+    xref: "x",
+    yref: `${axis} domain`,
+    x0: moment.at,
+    x1: moment.at,
+    y0: 0,
+    y1: 1,
+    line: { color: moment.colour, width: moment.width ?? 1.5, dash: moment.dash ?? "solid" },
+  }));
+}
+
+/** Where each long stop was cut out: a dotted line, as a moment that is no event. */
+const stopMoments = (cuts) =>
+  cuts.map((stop) => ({ at: stop.from, colour: STOP, width: 1, dash: "dot", layer: "below" }));
+
+/** The usual mark for a broken axis, sitting on the axis line where the time jumps. */
+function stopMarks(cuts) {
+  return cuts.map((stop) => ({
+    text: "//",
+    xref: "x",
+    yref: "paper",
+    x: stop.from,
+    y: 0,
+    yanchor: "middle",
+    showarrow: false,
+    borderpad: 0,
+    bgcolor: "#ffffff",
+    font: { size: 11, color: INK, weight: 600 },
+    hovertext: `Rig stopped ${duration(stop.ms)}: ${formatTime(stop.from)} to ${formatTime(stop.to)}`,
+    hoverlabel: { bgcolor: "#ffffff", bordercolor: STOP, font: { color: INK } },
+  }));
+}
+
+/** A legend entry for something drawn as a shape, which has no trace of its own. */
+function key(name, style) {
+  return { type: "scatter", x: [null], y: [null], name, hoverinfo: "skip", ...style };
+}
+
+/** One legend entry per shaded status; a heading only in a column, since a row has no room. */
+function statusKeys(legend, heading = true) {
+  const group = heading
+    ? { legendgroup: "status", legendgrouptitle: { text: "Status", font: { color: MUTED } } }
+    : {};
+  return Object.values(STATUS)
+    .filter((status) => status.band !== null)
+    .map((status) =>
+      key(status.band, {
+        mode: "markers",
+        legend,
+        ...group,
+        marker: {
+          symbol: "square",
+          size: 14,
+          color: status.shade,
+          line: { color: status.colour, width: 1 },
+        },
+      }),
+    );
 }
 
 function legendBeside([, top]) {
@@ -306,16 +427,6 @@ function drawChart(health, ratios, condition) {
   const cuts = longStops(health.timestamps);
   const marks = escalations(condition);
 
-  // Legend entries for what is drawn as shapes: they carry no data of their own.
-  const key = (name, style) => ({
-    type: "scatter",
-    x: [null],
-    y: [null],
-    name,
-    legend: "legend",
-    hoverinfo: "skip",
-    ...style,
-  });
   const traces = [
     {
       type: "scatter",
@@ -337,21 +448,7 @@ function drawChart(health, ratios, condition) {
     ...(cuts.length
       ? [key("stop ≥ 12 h, cut out", { mode: "lines", line: { color: STOP, width: 1, dash: "dot" } })]
       : []),
-    ...Object.values(STATUS)
-      .filter((status) => status.band !== null)
-      .map((status) =>
-        key(status.band, {
-          mode: "markers",
-          legendgroup: "status",
-          legendgrouptitle: { text: "Status", font: { color: MUTED } },
-          marker: {
-            symbol: "square",
-            size: 14,
-            color: status.shade,
-            line: { color: status.colour, width: 1 },
-          },
-        }),
-      ),
+    ...statusKeys("legend"),
     ...names.map((name, k) => {
       const envelope = name in ENVELOPE;
       return {
@@ -371,41 +468,11 @@ function drawChart(health, ratios, condition) {
 
   const shapes = statusShapes(health.timestamps, health.status);
   ["y", "y2", "y3"].forEach((axis) => {
-    shapes.push({
-      type: "line",
-      xref: "paper",
-      yref: axis,
-      x0: 0,
-      x1: 1,
-      y0: health.threshold,
-      y1: health.threshold,
-      line: { color: MUTED, width: 1, dash: "dash" },
-    });
-    marks.forEach((mark) => {
-      shapes.push({
-        type: "line",
-        xref: "x",
-        yref: `${axis} domain`,
-        x0: mark.at,
-        x1: mark.at,
-        y0: 0,
-        y1: 1,
-        line: { color: mark.colour, width: 1.5 },
-      });
-    });
-    cuts.forEach((stop) => {
-      shapes.push({
-        type: "line",
-        layer: "below",
-        xref: "x",
-        yref: `${axis} domain`,
-        x0: stop.from,
-        x1: stop.from,
-        y0: 0,
-        y1: 1,
-        line: { color: STOP, width: 1, dash: "dot" },
-      });
-    });
+    shapes.push(
+      thresholdShape(health.threshold, axis),
+      ...momentShapes(marks, axis),
+      ...momentShapes(stopMoments(cuts), axis),
+    );
   });
 
   const title = { yshift: 8, font: { size: 13, color: INK, weight: 600 } };
@@ -449,28 +516,11 @@ function drawChart(health, ratios, condition) {
       font: { size: 11, color: mark.colour, weight: 600 },
     });
   });
-  // The usual mark for a broken axis, sitting on the axis line where the time jumps.
-  cuts.forEach((stop) => {
-    annotations.push({
-      text: "//",
-      xref: "x",
-      yref: "paper",
-      x: stop.from,
-      y: 0,
-      yanchor: "middle",
-      showarrow: false,
-      borderpad: 0,
-      bgcolor: "#ffffff",
-      font: { size: 11, color: INK, weight: 600 },
-      hovertext: `Rig stopped ${duration(stop.ms)}: ${formatTime(stop.from)} to ${formatTime(stop.to)}`,
-      hoverlabel: { bgcolor: "#ffffff", bordercolor: STOP, font: { color: INK } },
-    });
-  });
+  annotations.push(...stopMarks(cuts));
 
-  const range = state.range === "final" ? finalPhase() : state.range;
   const layout = {
     height: 760,
-    margin: { l: 52, r: 190, t: 34, b: 36 },
+    margin: MARGIN,
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "#ffffff",
     font: { family: FONT, size: 12, color: INK },
@@ -478,35 +528,7 @@ function drawChart(health, ratios, condition) {
     hovermode: "x unified",
     hoversubplots: "axis",
     hoverlabel: { bgcolor: "rgba(255, 255, 255, 0.96)", bordercolor: GRID },
-    xaxis: {
-      type: "date",
-      anchor: "y3",
-      // A minute of margin on both sides of a cut keeps the line ends visible.
-      rangebreaks: cuts.map((stop) => ({
-        values: [isoAt(millis(stop.from) + 60000)],
-        dvalue: stop.ms - 120000,
-      })),
-      showline: true,
-      linecolor: "#c9c7be",
-      // Room below the axis line for the // marks.
-      ticklabelstandoff: 8,
-      hoverformat: "%Y-%m-%d %H:%M",
-      nticks: 9,
-      tickangle: 0,
-      tickformatstops: [
-        { dtickrange: [null, 86400000], value: "%b %d %H:%M" },
-        { dtickrange: [86400000, null], value: "%b %d" },
-      ],
-      gridcolor: GRID,
-      tickfont: { color: MUTED },
-      showspikes: true,
-      spikemode: "across",
-      spikesnap: "cursor",
-      spikethickness: 1,
-      spikedash: "solid",
-      spikecolor: "#a9a8a1",
-      ...(range ? { range, autorange: false } : { autorange: true }),
-    },
+    xaxis: timeAxis(cuts, "y3"),
     yaxis: logAxis(DOMAINS[0]),
     yaxis2: logAxis(DOMAINS[1]),
     yaxis3: logAxis(DOMAINS[2]),
@@ -519,6 +541,166 @@ function drawChart(health, ratios, condition) {
   return Plotly.react("chart", traces, layout, CONFIG);
 }
 
+// --- run overview -----------------------------------------------------------------------------
+
+const axisName = (k) => (k === 0 ? "y" : `y${k + 1}`);
+
+/** Each lane's vertical extent in paper units, top lane first. */
+function laneDomains(count) {
+  const plot = count * LANE_PX + (count - 1) * LANE_GAP_PX;
+  return Array.from({ length: count }, (_, k) => {
+    const top = 1 - (k * (LANE_PX + LANE_GAP_PX)) / plot;
+    return [top - LANE_PX / plot, top];
+  });
+}
+
+/** One range for every lane, so a bearing that only hears a fault sits visibly lower. */
+function sharedRange(series) {
+  let low = 0.8;
+  let high = 1;
+  for (const health of series) {
+    for (const value of health.index) {
+      if (value === null) continue;
+      low = Math.min(low, value * 0.95);
+      high = Math.max(high, value);
+    }
+  }
+  return [low, high * 1.25];
+}
+
+/** Lane ticks: the threshold first, then whatever fits in the lane without crowding. */
+function laneTicks([low, high], threshold) {
+  const pxPerDecade = LANE_PX / Math.log10(high / low);
+  const ticks = [];
+  for (const tick of [threshold, 10, 100, 1, 5, 50, 20]) {
+    const inside = tick >= low && tick <= high;
+    const clear = ticks.every((t) => Math.abs(Math.log10(tick / t)) * pxPerDecade >= 18);
+    if (inside && clear) ticks.push(tick);
+  }
+  return ticks.sort((a, b) => a - b);
+}
+
+const hindsight = (summary) =>
+  summary.documented_failure === null ? "survived" : `documented: ${summary.documented_failure}`;
+
+function drawOverview() {
+  const lanes = state.bearings.map((summary) => ({ summary, health: state.health[summary.bearing] }));
+  const { timestamps, threshold } = lanes[0].health;
+  const cuts = longStops(timestamps);
+  const domains = laneDomains(lanes.length);
+  const range = sharedRange(lanes.map((lane) => lane.health));
+
+  const traces = lanes.map(({ summary, health }, k) => {
+    const { x, ys } = breakAtGaps(health.timestamps, [
+      health.index,
+      health.driver.map((d) => (d === null ? "" : FEATURES[d].label)),
+    ]);
+    return {
+      type: "scatter",
+      mode: "lines",
+      name: `Bearing ${summary.bearing}`,
+      x,
+      y: ys[0],
+      customdata: ys[1],
+      yaxis: axisName(k),
+      showlegend: false,
+      line: { color: INK, width: 1.2 },
+      hovertemplate: `<b>%{y:.2f}×</b> from %{customdata}<extra>Bearing ${summary.bearing}</extra>`,
+    };
+  });
+  traces.push(
+    key(`threshold ${threshold}×`, { mode: "lines", line: { color: MUTED, width: 1, dash: "dash" } }),
+    ...statusKeys("legend", false),
+  );
+
+  const shapes = [];
+  const annotations = [];
+  lanes.forEach(({ summary, health }, k) => {
+    const axis = axisName(k);
+    const [bottom, top] = domains[k];
+    const selected = summary.bearing === state.bearing;
+    shapes.push(
+      ...statusShapes(health.timestamps, health.status, axis),
+      thresholdShape(threshold, axis),
+      ...momentShapes(stopMoments(cuts), axis),
+    );
+    // Outlined like its card, so the lane and the detail below it read as one selection.
+    if (selected) {
+      shapes.push({
+        type: "rect",
+        xref: "paper",
+        yref: `${axis} domain`,
+        x0: 0,
+        x1: 1,
+        y0: 0,
+        y1: 1,
+        line: { color: INK, width: 2 },
+      });
+    }
+    annotations.push(
+      note(`Bearing ${summary.bearing}`, 0, top, {
+        yshift: 2,
+        font: { size: 13, color: INK, weight: selected ? 700 : 500 },
+      }),
+      note(hindsight(summary), 1.02, (bottom + top) / 2, {
+        yanchor: "middle",
+        font: { size: 12, color: MUTED },
+      }),
+    );
+  });
+  annotations.push(...stopMarks(cuts));
+
+  const layout = {
+    height: MARGIN.t + MARGIN.b + lanes.length * LANE_PX + (lanes.length - 1) * LANE_GAP_PX,
+    margin: MARGIN,
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "#ffffff",
+    font: { family: FONT, size: 12, color: INK },
+    // Every bearing's index at the pointer's moment, to compare a source with its neighbours.
+    hovermode: "x unified",
+    hoversubplots: "axis",
+    hoverlabel: { bgcolor: "rgba(255, 255, 255, 0.96)", bordercolor: GRID },
+    xaxis: timeAxis(cuts, axisName(lanes.length - 1)),
+    // A key only: the lanes are not for hiding.
+    legend: {
+      orientation: "h",
+      x: 1,
+      xanchor: "right",
+      y: 1,
+      yanchor: "bottom",
+      bgcolor: "rgba(0,0,0,0)",
+      itemclick: false,
+      itemdoubleclick: false,
+    },
+    shapes,
+    annotations,
+  };
+  const ticks = laneTicks(range, threshold);
+  domains.forEach((domain, k) => {
+    layout[`yaxis${k === 0 ? "" : k + 1}`] = {
+      ...logAxis(domain, ticks),
+      range: range.map(Math.log10),
+      autorange: false,
+    };
+  });
+  return Plotly.react("overview-chart", traces, layout, CONFIG);
+}
+
+/** The bearing whose lane is nearest to a click, found from the pointer's height. */
+function laneAt(event) {
+  const box = $("overview-chart").getBoundingClientRect();
+  const y = 1 - (event.clientY - box.top - MARGIN.t) / (box.height - MARGIN.t - MARGIN.b);
+  const distance = ([bottom, top]) => Math.abs(y - (bottom + top) / 2);
+  const domains = laneDomains(state.bearings.length);
+  const nearest = domains.reduce((best, domain, k) => (distance(domain) < distance(domains[best]) ? k : best), 0);
+  return state.bearings[nearest].bearing;
+}
+
+function selectLane(click) {
+  const bearing = laneAt(click.event);
+  if (bearing !== state.bearing) handle(() => selectBearing(bearing))();
+}
+
 // --- time range -------------------------------------------------------------------------------
 
 function markRange() {
@@ -526,18 +708,43 @@ function markRange() {
   $("zoom-final").setAttribute("aria-pressed", String(state.range === "final"));
 }
 
+const CHARTS = ["overview-chart", "chart"];
+// Set while charts follow a range change, so their own relayout events are not taken as drags.
+let following = false;
+
+/** Shows the current range in every drawn chart but the one it came from. */
+async function applyRange(source = null) {
+  const range = state.range === "final" ? finalPhase() : state.range;
+  const update = range ? { "xaxis.range": range } : { "xaxis.autorange": true };
+  following = true;
+  try {
+    const drawn = CHARTS.filter((id) => id !== source && $(id).data);
+    await Promise.all(drawn.map((id) => Plotly.relayout(id, update)));
+  } finally {
+    following = false;
+  }
+}
+
 function showRange(range) {
   state.range = range;
   markRange();
-  const update = range === "final" ? { "xaxis.range": finalPhase() } : { "xaxis.autorange": true };
-  return Plotly.relayout("chart", update);
+  return applyRange();
 }
 
-/** Keeps a range dragged in the chart, so it survives switching bearings. */
-function followDrag(event) {
-  if ("xaxis.range[0]" in event) state.range = [event["xaxis.range[0]"], event["xaxis.range[1]"]];
-  if (event["xaxis.autorange"]) state.range = null;
-  markRange();
+/** Keeps a range dragged in one chart: the other follows, and it survives switching bearings. */
+function followDrag(source) {
+  return (event) => {
+    if (following) return;
+    if ("xaxis.range[0]" in event) {
+      state.range = [event["xaxis.range[0]"], event["xaxis.range[1]"]];
+    } else if (event["xaxis.autorange"]) {
+      state.range = null;
+    } else {
+      return;
+    }
+    markRange();
+    applyRange(source);
+  };
 }
 
 /** Legend clicks hide or isolate features; the first legend is a key, not for clicking. */
@@ -548,33 +755,36 @@ function featuresOnly(event) {
 
 // --- bearing detail ---------------------------------------------------------------------------
 
+/** Set after each draw; removing the old handlers first keeps one per event. */
+function listen(id, handlers) {
+  const chart = $(id);
+  for (const [event, handler] of Object.entries(handlers)) {
+    chart.removeAllListeners(event);
+    chart.on(event, handler);
+  }
+}
+
 async function selectBearing(bearing) {
-  const path = `${API}/experiments/${state.run}/bearings/${bearing}`;
-  const [health, ratios] = await Promise.all([
-    getJSON(`${path}/health-index`),
-    getJSON(`${path}/ratios`),
-  ]);
+  const ratios = await getJSON(`${API}/experiments/${state.run}/bearings/${bearing}/ratios`);
   state.bearing = bearing;
   remember();
   renderCards();
   markRange();
 
   const summary = state.bearings.find((b) => b.bearing === bearing);
+  // Shown before drawing: Plotly sizes a chart from its container.
+  $("overview").hidden = false;
+  $("overview-title").textContent = `${runLabel(state.run)} · all bearings`;
   $("detail").hidden = false;
   $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
 
-  const chart = $("chart");
-  await drawChart(health, ratios, summary.condition);
-  // Set after each draw; removing the old handlers first keeps one per event.
-  const handlers = {
-    plotly_relayout: followDrag,
+  await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
+  listen("overview-chart", { plotly_relayout: followDrag("overview-chart"), plotly_click: selectLane });
+  listen("chart", {
+    plotly_relayout: followDrag("chart"),
     plotly_legendclick: featuresOnly,
     plotly_legenddoubleclick: featuresOnly,
-  };
-  for (const [event, handler] of Object.entries(handlers)) {
-    chart.removeAllListeners(event);
-    chart.on(event, handler);
-  }
+  });
 }
 
 // --- start ------------------------------------------------------------------------------------
