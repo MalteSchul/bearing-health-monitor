@@ -353,4 +353,6 @@ class Copilot:
             answer = self._writer(SYSTEM, message)
         except Unavailable as exc:
             return CopilotAnswer(answer=None, note=str(exc), sources=sources)
-        return CopilotAnswer(answer=answer, sources=sources)
+        # Models bold their key sentence out of habit, even when asked for plain text, and the
+        # dashboard shows text as it is. Two asterisks mean nothing in prose, so nothing is lost.
+        return CopilotAnswer(answer=answer.replace("**", ""), sources=sources)

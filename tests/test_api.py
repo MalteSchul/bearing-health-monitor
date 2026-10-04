@@ -466,6 +466,15 @@ def test_copilot_sends_the_facts_and_the_tagged_question_to_the_writer(tmp_path)
     assert sent.endswith("<question>What should I do?</question>")
 
 
+def test_copilot_answers_in_plain_text_when_the_model_writes_bold(tmp_path):
+    writer = FakeWriter("**Bearing 1 is in alert.** [1] Plan the replacement [2].")
+    client = copilot_client(tmp_path, writer=writer)
+
+    body = client.post(COPILOT, json={"question": "What should I do?", "bearing": 1}).json()
+
+    assert body["answer"] == "Bearing 1 is in alert. [1] Plan the replacement [2]."
+
+
 def test_copilot_answers_about_the_whole_run_without_a_bearing(tmp_path):
     client = copilot_client(tmp_path)
 
