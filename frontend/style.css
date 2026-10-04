@@ -97,10 +97,6 @@ button {
   color: var(--surface);
 }
 
-#run-info {
-  margin: 22px 0 0;
-}
-
 #run-bar {
   position: sticky;
   top: 0;
@@ -108,7 +104,7 @@ button {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 14px;
+  margin: 18px 0 14px;
   padding: 10px 0;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -168,6 +164,24 @@ button {
   font-size: 12px;
 }
 
+/* Hindsight is the documented end of the run: off by default, so the page is what the operator saw. */
+body:not(.hindsight-on) .hindsight {
+  display: none;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.switch input {
+  accent-color: var(--ink);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -175,21 +189,30 @@ button {
 }
 
 .card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
   text-align: left;
-  padding: 16px 18px;
+  padding: 18px 18px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-top: 5px solid var(--status);
   border-radius: var(--radius);
   transition: box-shadow 0.15s, border-color 0.15s;
 }
 
+/* Colour only on an alarm: a bar along the top, drawn over the padding so every card keeps its size. */
+.card.alarm::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: var(--status);
+}
+
 .card:hover {
   border-color: var(--line-strong);
-  border-top-color: var(--status);
   box-shadow: var(--shadow);
 }
 
@@ -219,6 +242,14 @@ button {
   font-weight: 600;
 }
 
+/* A normal state is said, not signalled. */
+.pill.calm,
+#machine .pill.calm {
+  padding-inline: 0;
+  background: none;
+  color: var(--muted);
+}
+
 .index {
   margin-top: 6px;
   font-size: 30px;
@@ -235,14 +266,9 @@ button {
   color: var(--muted);
 }
 
-.driver {
-  font-size: 13px;
-  color: var(--muted);
-}
-
+/* One line high even when empty, so a replay does not make the cards jump. */
 .facts {
-  min-height: 3em;
-  margin-top: 4px;
+  min-height: 1.45em;
   font-size: 14px;
 }
 
@@ -314,6 +340,31 @@ button {
 
 #copilot {
   padding-bottom: 20px;
+}
+
+/* Folded by default: one line under the cards, opened when there is something to ask. */
+#copilot > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+#copilot > summary::-webkit-details-marker {
+  display: none;
+}
+
+#copilot > summary h2::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+}
+
+#copilot[open] > summary h2::before {
+  content: "▾";
+}
+
+#ask-scope {
+  margin: 10px 0 0;
+  font-size: 14px;
 }
 
 #ask {
