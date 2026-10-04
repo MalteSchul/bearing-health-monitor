@@ -164,16 +164,10 @@ button {
   font-size: 12px;
 }
 
-/* Hindsight is the documented end of the run: off by default, so the page is what the operator saw. */
-body:not(.hindsight-on) .hindsight {
-  display: none;
-}
-
 .switch {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   font-size: 14px;
   cursor: pointer;
 }
@@ -272,25 +266,9 @@ body:not(.hindsight-on) .hindsight {
   font-size: 14px;
 }
 
-/* Their markup is rewritten when the condition changes: a press lands on the span that stays. */
-.facts *,
-.truth * {
+/* Its markup is rewritten when the condition changes: a press lands on the span that stays. */
+.facts * {
   pointer-events: none;
-}
-
-.truth {
-  margin-top: auto;
-  padding-top: 10px;
-  border-top: 1px dashed var(--line);
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.truth small {
-  display: block;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .panel {
@@ -311,6 +289,24 @@ body:not(.hindsight-on) .hindsight {
 .panel-head p {
   margin: 0;
   font-size: 14px;
+}
+
+/* A panel's own controls, at its right edge. */
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-left: auto;
+}
+
+.panel-tools .segmented button {
+  padding: 4px 12px;
+  font-size: 14px;
+}
+
+/* Brought into view after a click, clear of the sticky bar. */
+#detail {
+  scroll-margin-top: 80px;
 }
 
 #run-result {

@@ -221,15 +221,11 @@ function leads(result) {
 const listed = (items) =>
   items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 
-/** The run's result in one line. Hindsight, so it stays put while the replay moves. */
+/** The run's result in one line; each lane gives its bearing's. Stays put while the replay moves. */
 function renderResult() {
   const run = state.evaluation;
-  const leadHours = run.bearings
-    .filter((r) => r.verdict === "detected")
-    .map((r) => Math.round(r.alert_lead_op_h));
-  const ahead = leadHours.length ? ` (${listed(leadHours)} op-h before the run ended)` : "";
   $("run-result").textContent =
-    `Hindsight · documented failures alerted: ${run.failures_alerted} of ${run.failures}${ahead}` +
+    `Documented failures alerted: ${run.failures_alerted} of ${run.failures}` +
     ` · false alarms on survivors: ${run.false_alarms} of ${run.survivors}`;
 }
 
@@ -258,15 +254,14 @@ function buildCard(bearing) {
   card.className = "card";
   card.dataset.bearing = String(bearing);
   // A toggle: pressing the selected card again releases it, back to the whole rig.
-  card.addEventListener("click", handle(() => selectBearing(bearing === state.bearing ? null : bearing)));
+  card.addEventListener("click", handle(() => pickBearing(bearing === state.bearing ? null : bearing)));
   card.innerHTML = `
     <span class="card-head">
       <span class="name">Bearing ${bearing}</span>
       <span class="pill"></span>
     </span>
     <span class="index"><span class="value"></span><small>health index</small></span>
-    <span class="facts"></span>
-    <span class="truth hindsight" title="From the dataset readme. The detector never sees it."></span>`;
+    <span class="facts"></span>`;
   return card;
 }
 
@@ -282,8 +277,6 @@ function setMarkup(element, html) {
 function fillCard(card, summary) {
   const { condition } = summary;
   const status = STATUS[condition.status];
-  const result = resultOf(summary.bearing);
-  const lead = leads(result);
   const part = (name) => card.querySelector(`.${name}`);
   const alarm = condition.status in ACTIONS;
   card.style.setProperty("--status", status.colour);
@@ -293,12 +286,6 @@ function fillCard(card, summary) {
   part("pill").classList.toggle("calm", !alarm);
   part("value").textContent = condition.index === null ? "–" : `${condition.index.toFixed(1)}×`;
   setMarkup(part("facts"), cardLine(condition));
-  setMarkup(
-    part("truth"),
-    `<small>Documented at the end · hindsight</small>
-    ${summary.documented_failure ?? "survived"} · <strong>${result.verdict}</strong>
-    ${lead === null ? "" : `<br>${lead}<br>before the run ended`}`,
-  );
 }
 
 /**
@@ -410,9 +397,10 @@ function timeAxis(cuts, anchor) {
     hoverformat: "%Y-%m-%d %H:%M",
     nticks: 9,
     tickangle: 0,
+    // Times only on ticks less than a day apart: daily ticks all fall at midnight.
     tickformatstops: [
-      { dtickrange: [null, 86400000], value: "%b %d %H:%M" },
-      { dtickrange: [86400000, null], value: "%b %d" },
+      { dtickrange: [null, 43200000], value: "%b %d %H:%M" },
+      { dtickrange: [43200000, null], value: "%b %d" },
     ],
     gridcolor: GRID,
     tickfont: { color: MUTED },
@@ -652,7 +640,7 @@ function drawChart(health, ratios, condition) {
     title(
       "Health index and status",
       domains[0][1],
-      `The largest feature over its baseline<br>alert: ${health.threshold}× for 1 h on own evidence<br>` +
+      `The largest feature over its baseline<br>alert: ${health.threshold}× for 1 h, not crosstalk<br>` +
         `danger: rms ${health.threshold}× as well`,
     ),
   ];
@@ -903,7 +891,7 @@ function watchLaneClicks() {
       const moved = Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY);
       press = null;
       const bearing = laneAt(event);
-      if (moved <= 4 && bearing !== state.bearing) handle(() => selectBearing(bearing))();
+      if (moved <= 4 && bearing !== state.bearing) handle(() => pickBearing(bearing))();
     },
     true,
   );
@@ -1096,14 +1084,13 @@ async function selectBearing(bearing) {
   $("copilot").hidden = false;
   // Shown before drawing: Plotly sizes a chart from its container.
   $("overview").hidden = false;
-  $("overview-title").textContent = `${runLabel(state.run)} · all bearings`;
   $("detail").hidden = bearing === null;
   if (bearing === null) {
     // Gone rather than hidden, so the replay and the time range leave it alone.
     Plotly.purge("chart");
     await drawOverview();
   } else {
-    $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
+    $("detail-title").textContent = `Bearing ${bearing}`;
     const summary = state.bearings.find((b) => b.bearing === bearing);
     await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
     listen("chart", {
@@ -1113,6 +1100,15 @@ async function selectBearing(bearing) {
     });
   }
   listen("overview-chart", { plotly_relayout: followDrag("overview-chart") });
+}
+
+/**
+ * A selection by click, which also brings the detail into view: it sits below the overview, out of
+ * sight from the cards. Loading a run or a link selects without scrolling.
+ */
+async function pickBearing(bearing) {
+  await selectBearing(bearing);
+  if (bearing !== null) $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // --- copilot ----------------------------------------------------------------------------------
@@ -1129,10 +1125,8 @@ const CITATION = /\[(\d+)\]/;
 
 /** What a question is about: the selected bearing, or the whole rig. Follows the selection. */
 function renderScope() {
-  $("ask-scope").textContent =
-    state.bearing === null
-      ? "About the whole rig at the moment shown · click a card to ask about one bearing · answers only from looked-up facts, each cited"
-      : `About the moment shown, with bearing ${state.bearing} in focus · click its card again for the whole rig · answers only from looked-up facts, each cited`;
+  const focus = state.bearing === null ? "the whole rig" : `bearing ${state.bearing}`;
+  $("ask-scope").textContent = `Focus: ${focus} · answers only from looked-up facts, each cited`;
   const fitting = SUGGESTIONS.filter((s) => state.bearing !== null || !s.needsBearing);
   $("suggestions").replaceChildren(
     ...fitting.map(({ text }) => {
@@ -1187,6 +1181,7 @@ async function ask() {
     state.asked = asked;
     renderReply(body);
     setStatus("");
+    $("question").value = "";
   } catch (error) {
     setStatus(`Could not ask: ${error.message}`, true);
   } finally {
@@ -1326,11 +1321,11 @@ async function start() {
   await selectRun(run, bearing, params.get("at"));
 }
 
-/** Everything marked .hindsight follows one switch; the overview's lane verdicts need a redraw. */
+/** The run's result line follows at once; the lane verdicts need the overview redrawn. */
 function showHindsight(on) {
   state.hindsight = on;
   $("hindsight").checked = on;
-  document.body.classList.toggle("hindsight-on", on);
+  $("run-result").hidden = !on;
 }
 
 handle(start)();

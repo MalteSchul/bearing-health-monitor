@@ -22,17 +22,15 @@
   </header>
 
   <main>
-    <!-- Stays in view while scrolling: the moment and the time range scope everything below. -->
+    <!-- Stays in view while scrolling: the rig at the moment shown, which scopes everything below. -->
     <div id="run-bar">
       <span id="machine"><small>Rig</small><span class="pill"></span></span>
       <button id="play" class="play" aria-label="Replay the run">▶ Replay</button>
       <input id="moment" type="range" min="0" max="0" step="1" value="0" aria-label="Moment shown">
       <output id="as-of" for="moment"></output>
-      <div class="segmented" role="group" aria-label="Time range">
-        <button id="zoom-all" aria-pressed="true">Whole run</button>
-        <button id="zoom-final" aria-pressed="false">Final 100 h</button>
-      </div>
     </div>
+    <!-- Under the bar, where it is seen: a failed load leaves the rest of the page as it was. -->
+    <p id="error" role="alert" hidden></p>
     <section id="bearings" class="grid" aria-label="Bearings"></section>
 
     <details id="copilot" class="panel" aria-labelledby="copilot-title" hidden>
@@ -62,23 +60,30 @@
 
     <section id="overview" class="panel" hidden>
       <div class="panel-head">
-        <h2 id="overview-title"></h2>
+        <h2>All bearings</h2>
         <p class="muted">Click a lane for its detail</p>
-        <label class="switch"><input id="hindsight" type="checkbox"> Show hindsight</label>
+        <div class="panel-tools">
+          <!-- Zooms both charts, which share their time axis. -->
+          <div class="segmented" role="group" aria-label="Time range">
+            <button id="zoom-all" aria-pressed="true">Whole run</button>
+            <button id="zoom-final" aria-pressed="false">Final 100 h</button>
+          </div>
+          <label class="switch"><input id="hindsight" type="checkbox"> Show hindsight</label>
+        </div>
       </div>
-      <p id="run-result" class="hindsight"></p>
+      <p id="run-result" hidden></p>
       <div id="overview-chart"></div>
     </section>
 
     <section id="detail" class="panel" hidden>
       <div class="panel-head">
         <h2 id="detail-title"></h2>
-        <label class="switch"><input id="features" type="checkbox"> Show features</label>
+        <div class="panel-tools">
+          <label class="switch"><input id="features" type="checkbox"> Show features</label>
+        </div>
       </div>
       <div id="chart"></div>
     </section>
-
-    <p id="error" role="alert" hidden></p>
   </main>
 
   <footer class="muted">
