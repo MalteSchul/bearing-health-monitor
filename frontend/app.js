@@ -61,33 +61,53 @@ const MARGIN = { l: 52, r: 190, t: 34, b: 36 };
 // Overview lanes in pixels, so every run's overview looks alike whatever its bearing count.
 const LANE_PX = 80;
 const LANE_GAP_PX = 30;
+// A replay lasts about this long whatever the run's length: it skips snapshots on long runs.
+const PLAY_MS = 30_000;
+const FRAME_MS = 100;
+// The page background, translucent: what came later stays visible, but steps back.
+const VEIL = "rgba(246, 245, 241, 0.78)";
 
-// range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
+// bearings: each bearing's condition at the end of the run, which the charts mark.
+// cards: each bearing's condition as of the moment shown, which the cards report.
 // health: each bearing's health-index series of the current run, which the overview draws.
-const state = { run: null, last: null, bearing: null, bearings: [], health: {}, range: null };
+// moment: index of the snapshot shown, null for the latest.
+// range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
+const state = {
+  run: null,
+  last: null,
+  bearing: null,
+  bearings: [],
+  cards: [],
+  health: {},
+  moment: null,
+  range: null,
+};
 
 const $ = (id) => document.getElementById(id);
 
-async function getJSON(path) {
-  const response = await fetch(path);
+async function getJSON(path, signal = undefined) {
+  const response = await fetch(path, { signal });
   if (!response.ok) {
     throw new Error(`${path}: ${response.status} ${response.statusText}`);
   }
   return response.json();
 }
 
-/** A click's work, with the page marked busy meanwhile and any failure shown. */
-function handle(task) {
+/**
+ * A click's work with any failure shown, and the page marked busy meanwhile. Replay steps are not
+ * marked: dimming the page ten times a second would flicker.
+ */
+function handle(task, busy = true) {
   return async () => {
     $("error").hidden = true;
-    document.body.classList.add("loading");
+    if (busy) document.body.classList.add("loading");
     try {
       await task();
     } catch (error) {
       $("error").textContent = `Could not load data. ${error.message}`;
       $("error").hidden = false;
     } finally {
-      document.body.classList.remove("loading");
+      if (busy) document.body.classList.remove("loading");
     }
   };
 }
@@ -113,13 +133,19 @@ function renderRuns(experiments) {
   );
 }
 
-/** Run and bearing in the address, so a view can be bookmarked and shared. */
+/** Run, bearing and moment in the address, so a view can be bookmarked and shared. */
 function remember() {
   const params = new URLSearchParams({ run: state.run, bearing: state.bearing });
+  if (state.moment !== null) params.set("at", runTimes()[state.moment]);
   history.replaceState(null, "", `?${params}`);
 }
 
-async function selectRun(name, bearing = state.bearing) {
+/** The run's snapshot times: every bearing is recorded at each of them. */
+const runTimes = () => state.health[state.bearings[0].bearing].timestamps;
+
+async function selectRun(name, bearing = state.bearing, at = null) {
+  playing = false;
+  cardsRequest?.abort();
   const experiment = await getJSON(`${API}/experiments/${name}`);
   const series = await Promise.all(
     experiment.bearings.map((b) => getJSON(`${API}/experiments/${name}/bearings/${b.bearing}/health-index`)),
@@ -130,6 +156,19 @@ async function selectRun(name, bearing = state.bearing) {
   state.last = experiment.last;
   state.bearings = experiment.bearings;
   state.health = Object.fromEntries(series.map((health) => [health.bearing, health]));
+
+  // A new run starts at its end unless the address asks for a moment.
+  const times = runTimes();
+  const last = times.length - 1;
+  const index = at === null ? last : Math.max(0, times.findLastIndex((time) => time <= at));
+  state.moment = index >= last ? null : index;
+  state.cards =
+    state.moment === null
+      ? experiment.bearings
+      : (await getJSON(`${API}/experiments/${name}?at=${encodeURIComponent(times[index])}`)).bearings;
+  $("moment").max = String(last);
+  $("moment").value = String(index);
+  markMoment();
   for (const button of $("runs").children) {
     button.setAttribute("aria-pressed", String(button.dataset.run === name));
   }
@@ -164,7 +203,7 @@ function conditionFacts(condition) {
 
 function renderCards() {
   $("bearings").replaceChildren(
-    ...state.bearings.map((summary) => {
+    ...state.cards.map((summary) => {
       const { condition } = summary;
       const status = STATUS[condition.status];
       const card = document.createElement("button");
@@ -358,6 +397,40 @@ function key(name, style) {
   return { type: "scatter", x: [null], y: [null], name, hoverinfo: "skip", ...style };
 }
 
+/**
+ * The replay's moment: a line at it and a veil over what came later, which nobody knew yet. Always
+ * the last two shapes of a chart, so a replay step moves them without redrawing the rest.
+ */
+function replayShapes(last) {
+  const now = state.moment === null ? last : runTimes()[state.moment];
+  return [
+    {
+      type: "rect",
+      layer: "above",
+      xref: "x",
+      yref: "paper",
+      x0: now,
+      x1: last,
+      y0: 0,
+      y1: 1,
+      fillcolor: VEIL,
+      line: { width: 0 },
+    },
+    {
+      type: "line",
+      layer: "above",
+      xref: "x",
+      yref: "paper",
+      x0: now,
+      x1: now,
+      y0: 0,
+      y1: 1,
+      visible: state.moment !== null,
+      line: { color: INK, width: 1.5 },
+    },
+  ];
+}
+
 /** One legend entry per shaded status; a heading only in a column, since a row has no room. */
 function statusKeys(legend, heading = true) {
   const group = heading
@@ -474,6 +547,7 @@ function drawChart(health, ratios, condition) {
       ...momentShapes(stopMoments(cuts), axis),
     );
   });
+  shapes.push(...replayShapes(health.timestamps.at(-1)));
 
   const title = { yshift: 8, font: { size: 13, color: INK, weight: 600 } };
   const annotations = [
@@ -648,6 +722,7 @@ function drawOverview() {
       }),
     );
   });
+  shapes.push(...replayShapes(timestamps.at(-1)));
   annotations.push(...stopMarks(cuts));
 
   const layout = {
@@ -753,6 +828,99 @@ function featuresOnly(event) {
   return event.data[event.curveNumber].legend !== "legend";
 }
 
+// --- replay -----------------------------------------------------------------------------------
+
+let playing = false;
+// The cards' request in flight: a newer moment cancels it, so an old answer never lands last.
+let cardsRequest = null;
+
+/** What the bar says about the moment shown. */
+function markMoment() {
+  const times = runTimes();
+  const latest = state.moment === null;
+  const at = formatTime(times[state.moment ?? times.length - 1]);
+  const note = document.createElement("small");
+  note.textContent = latest ? "the whole run is known" : "dimmed: not known yet then";
+  $("as-of").replaceChildren(`${latest ? "Latest" : "As of"} ${at}`, note);
+}
+
+function markPlay() {
+  $("play").textContent = playing ? "❚❚ Pause" : "▶ Replay";
+  $("play").setAttribute("aria-label", playing ? "Pause the replay" : "Replay the run");
+}
+
+/** Moves the line and the veil in every drawn chart; nothing else is redrawn. */
+function moveVeil() {
+  const [veil, line] = replayShapes(runTimes().at(-1));
+  const drawn = CHARTS.filter((id) => $(id).data);
+  return Promise.all(
+    drawn.map((id) => {
+      const k = $(id).layout.shapes.length - 2;
+      return Plotly.relayout(id, {
+        [`shapes[${k}].x0`]: veil.x0,
+        [`shapes[${k + 1}].x0`]: line.x0,
+        [`shapes[${k + 1}].x1`]: line.x1,
+        [`shapes[${k + 1}].visible`]: line.visible,
+      });
+    }),
+  );
+}
+
+/** The cards as of the moment shown, through the same `?at=` any API client would use. */
+async function loadCards() {
+  cardsRequest?.abort();
+  if (state.moment === null) {
+    state.cards = state.bearings;
+    renderCards();
+    return;
+  }
+  const request = new AbortController();
+  cardsRequest = request;
+  const at = encodeURIComponent(runTimes()[state.moment]);
+  try {
+    state.cards = (await getJSON(`${API}/experiments/${state.run}?at=${at}`, request.signal)).bearings;
+    renderCards();
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  }
+}
+
+async function showMoment(index) {
+  state.moment = index >= runTimes().length - 1 ? null : index;
+  $("moment").value = String(index);
+  markMoment();
+  remember();
+  await Promise.all([moveVeil(), loadCards()]);
+}
+
+/** Steps through the run from where the slider is, or from its start when at the end. */
+async function play() {
+  if (playing) {
+    playing = false;
+    return;
+  }
+  const run = state.run;
+  const last = runTimes().length - 1;
+  const step = Math.max(1, Math.round(last / (PLAY_MS / FRAME_MS)));
+  let index = state.moment ?? 0;
+  playing = true;
+  markPlay();
+  try {
+    // Each frame waits for its cards, so a slow connection slows the replay instead of piling up.
+    while (playing && state.run === run) {
+      const started = performance.now();
+      await showMoment(index);
+      if (index === last) break;
+      index = Math.min(last, index + step);
+      const rest = FRAME_MS - (performance.now() - started);
+      if (rest > 0) await new Promise((resolve) => setTimeout(resolve, rest));
+    }
+  } finally {
+    playing = false;
+    markPlay();
+  }
+}
+
 // --- bearing detail ---------------------------------------------------------------------------
 
 /** Set after each draw; removing the old handlers first keeps one per event. */
@@ -792,6 +960,12 @@ async function selectBearing(bearing) {
 async function start() {
   $("zoom-all").addEventListener("click", () => showRange(null));
   $("zoom-final").addEventListener("click", () => showRange("final"));
+  $("play").addEventListener("click", handle(play, false));
+  // Dragging the slider takes over from a running replay.
+  $("moment").addEventListener("input", (event) => {
+    playing = false;
+    handle(() => showMoment(Number(event.target.value)), false)();
+  });
   const [experiments, version] = await Promise.all([
     getJSON(`${API}/experiments`),
     getJSON("/api/version"),
@@ -801,7 +975,7 @@ async function start() {
   const params = new URLSearchParams(location.search);
   const names = experiments.map((e) => e.name);
   const run = names.includes(params.get("run")) ? params.get("run") : names[0];
-  await selectRun(run, Number(params.get("bearing")));
+  await selectRun(run, Number(params.get("bearing")), params.get("at"));
 }
 
 handle(start)();

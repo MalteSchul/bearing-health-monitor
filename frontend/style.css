@@ -97,22 +97,56 @@ button {
   color: var(--surface);
 }
 
+#run-info {
+  margin: 22px 0 0;
+}
+
 #run-bar {
   position: sticky;
   top: 0;
   z-index: 10;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin: 12px 0 14px;
+  gap: 14px;
+  margin-bottom: 14px;
   padding: 10px 0;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
-#run-info {
-  margin: 0;
+.play {
+  flex-shrink: 0;
+  width: 108px;
+  padding: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.play:hover {
+  border-color: var(--line-strong);
+}
+
+#moment {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+/* A fixed width, so the bar does not shift while the moment changes. */
+#as-of {
+  flex-shrink: 0;
+  width: 250px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+#as-of small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .grid {
