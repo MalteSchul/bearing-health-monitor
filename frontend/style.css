@@ -21,6 +21,7 @@ body {
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+#bench,
 header,
 main,
 footer {
@@ -30,7 +31,8 @@ footer {
 }
 
 header {
-  padding-top: 32px;
+  padding-top: 36px;
+  padding-bottom: 20px;
 }
 
 h1 {
@@ -89,55 +91,41 @@ button {
   color: var(--surface);
 }
 
-/* Dark like a player around the screen, so it never reads as part of the operator's view. */
-#playback {
-  --strip-line: #4a4944;
-  --strip-muted: #b9b8b1;
+/* The page background behind it, so the monitor scrolls away underneath. */
+#bench {
   position: sticky;
   top: 0;
   z-index: 10;
+  padding-top: 16px;
+  padding-bottom: 12px;
+  background: var(--bg);
+}
+
+#playback {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin: 18px 0 20px;
-  padding: 10px 16px;
+  gap: 16px;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
 #playback > small {
   flex-shrink: 0;
-  color: var(--strip-muted);
+  color: var(--muted);
   font-size: 12px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-#playback .segmented {
-  border-color: var(--strip-line);
-  background: none;
 }
 
 #playback .segmented button {
   padding: 5px 14px;
 }
 
-#playback .segmented button + button {
-  border-left-color: var(--strip-line);
-}
-
-#playback .segmented button:hover {
-  background: #33332f;
-}
-
-#playback .segmented button[aria-pressed="true"] {
-  background: var(--bg);
-  color: var(--ink);
-}
-
 #playback .switch input {
-  accent-color: var(--bg);
+  accent-color: var(--ink);
 }
 
 /* The rig's one light, heading the operator's view. */
@@ -162,20 +150,20 @@ button {
   flex-shrink: 0;
   width: 100px;
   padding: 5px 0;
-  border: 1px solid var(--strip-line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: none;
+  background: var(--surface);
   font-weight: 600;
 }
 
 .play:hover {
-  border-color: var(--strip-muted);
+  border-color: var(--line-strong);
 }
 
 #moment {
   flex: 1;
   min-width: 120px;
-  accent-color: var(--bg);
+  accent-color: var(--ink);
   cursor: pointer;
 }
 
@@ -189,7 +177,7 @@ button {
 
 #as-of small {
   display: block;
-  color: var(--strip-muted);
+  color: var(--muted);
   font-size: 12px;
 }
 

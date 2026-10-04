@@ -13,11 +13,8 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1>Bearing Health Monitor</h1>
-  </header>
-
-  <main>
+  <!-- Above the monitor, not part of it: the bench that plays a recording into it. -->
+  <div id="bench">
     <!-- The test bench: which recording, which moment, and what was found after the run. An
          operator watching a live machine has none of this. Stays in view while scrolling. -->
     <div id="playback" role="group" aria-label="Recorded test">
@@ -28,7 +25,14 @@
       <output id="as-of" for="moment"></output>
       <label class="switch"><input id="hindsight" type="checkbox"> Show hindsight</label>
     </div>
-    <!-- Under the strip, where it is seen: a failed load leaves the rest of the page as it was. -->
+  </div>
+
+  <header>
+    <h1>Bearing Health Monitor</h1>
+  </header>
+
+  <main>
+    <!-- At the top of the monitor, where it is seen: a failed load leaves the rest as it was. -->
     <p id="error" role="alert" hidden></p>
 
     <!-- From here on: what an operator would see at the moment shown. -->
