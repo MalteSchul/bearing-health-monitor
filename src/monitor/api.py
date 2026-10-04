@@ -8,10 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import NaiveDatetime
 
 from monitor.config import Settings
+from monitor.evaluation import RunEvaluation
 from monitor.store import (
     BearingFeatures,
     BearingSummary,
     ExperimentSummary,
+    FeatureRatios,
     FeatureStore,
     HealthIndex,
     NoDataYet,
@@ -22,7 +24,10 @@ API_PREFIX = "/api"
 # offset, so one sent with "Z" or "+02:00" would be ambiguous and is rejected.
 AsOf = Annotated[
     NaiveDatetime | None,
-    Query(description="Condition as of this time, e.g. 2004-02-16T04:00. Latest if omitted."),
+    Query(
+        description="Condition as of this local rig time, without offset. Latest if omitted.",
+        examples=["2004-02-16T04:00:00"],
+    ),
 ]
 
 
@@ -74,6 +79,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def bearings(experiment: str, at: AsOf = None) -> list[BearingSummary]:
         return experiment_summary(experiment, at).bearings
 
+    # Hindsight, unlike the conditions: it compares with the state documented at the end of the
+    # run, so it has no `at`.
+    @v1.get("/experiments/{experiment}/evaluation")
+    def experiment_evaluation(experiment: str) -> RunEvaluation:
+        evaluation = store.evaluation(experiment)
+        if evaluation is None:
+            raise HTTPException(404, f"Unknown experiment {experiment!r}")
+        return evaluation
+
     def no_bearing(experiment: str, bearing: int) -> HTTPException:
         return HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
 
@@ -98,6 +112,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if health is None:
             raise no_bearing(experiment, bearing)
         return health
+
+    # Served, not recomputed in the browser: the baseline rule lives in one place.
+    @v1.get("/experiments/{experiment}/bearings/{bearing}/ratios")
+    def bearing_ratios(experiment: str, bearing: int) -> FeatureRatios:
+        ratios = store.ratios(experiment, bearing)
+        if ratios is None:
+            raise no_bearing(experiment, bearing)
+        return ratios
 
     # The bearing exists, but nothing was known about it yet at that time.
     @app.exception_handler(NoDataYet)

@@ -32,11 +32,17 @@ Run `just` to list all recipes.
 - `src/monitor/`: Python package (`/api/health` and `/api/version` for operations, business endpoints under `/api/v1`)
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}`: one bearing and its condition; every
   shorter prefix (`.../bearings`, `/experiments/{experiment}`, `/experiments`) is a resource too.
-  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time
+  Add `?at=2004-02-16T04:00` to get the condition as it was known at that time. An experiment
+  also reports its `machine`: the worst bearing's status and which bearings have it
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/features`: feature trends of one bearing
 - `GET /api/v1/experiments/{experiment}/bearings/{bearing}/health-index`: health index and status
-  per snapshot
-- `frontend/`: static dashboard, served by the API at `/`. The directory is configurable
+  per snapshot: `baseline`, `ok`, `crosstalk`, `alert` (plan the replacement), `danger` (act now)
+- `GET /api/v1/experiments/{experiment}/bearings/{bearing}/ratios`: each feature relative to its
+  baseline, what the detector compares (the health index is the largest)
+- `GET /api/v1/experiments/{experiment}/evaluation`: hindsight per bearing (detected, missed,
+  false alarm, quiet) and the operating hours each level came before the run ended
+- `frontend/`: static dashboard, served by the API at `/`. `?run=set2&bearing=1&at=2004-02-16T04:12:39`
+  opens a replay at that moment. The directory is configurable
   via `MONITOR_FRONTEND_DIR`, so a React/Vite build (`frontend/dist`) can replace it without
   backend changes. For a separate dev server, set `MONITOR_CORS_ORIGINS='["http://localhost:5173"]'`.
 - `data/processed/`: precomputed features shipped with the image. Raw data is never committed.

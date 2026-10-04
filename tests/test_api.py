@@ -10,11 +10,11 @@ from monitor.config import Settings
 from monitor.features import FEATURES, ChannelFeatures
 from monitor.store import ChannelSeries
 
-# 30 hours of 10-minute snapshots: the first 24 are the baseline, the rest can raise an alarm.
+# 30 hours of 10-minute snapshots: the first 24 are the baseline, the rest can raise an alert.
 SNAPSHOTS = 180
 START = datetime(2004, 2, 12, 10, 0)
 FAULT_FROM = START + timedelta(hours=26)
-ALARM_AT = FAULT_FROM + timedelta(hours=1)
+ALERT_AT = FAULT_FROM + timedelta(hours=1)
 
 
 def feature_rows(experiment: str, bearing: int, channel: int) -> list[dict[str, object]]:
@@ -119,7 +119,7 @@ def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
     set2 = experiments["set2"]
     assert set2["snapshots"] == SNAPSHOTS
     assert set2["first"] == START.isoformat()
-    assert [(b["bearing"], b["channels"], b["failure"]) for b in set2["bearings"]] == [
+    assert [(b["bearing"], b["channels"], b["documented_failure"]) for b in set2["bearings"]] == [
         (1, [1], "outer race"),
         (2, [2], None),
     ]
@@ -131,7 +131,7 @@ def test_bearings_of_an_experiment(tmp_path):
 
     [bearing] = client.get("/api/v1/experiments/set1/bearings").json()
 
-    assert (bearing["bearing"], bearing["channels"], bearing["failure"]) == (
+    assert (bearing["bearing"], bearing["channels"], bearing["documented_failure"]) == (
         3,
         [5, 6],
         "inner race",
@@ -146,14 +146,15 @@ def test_bearings_report_their_latest_condition(tmp_path):
     last = (START + timedelta(minutes=10 * (SNAPSHOTS - 1))).isoformat()
     assert failing["condition"] == {
         "as_of": last,
-        "status": "alarm",
+        "status": "alert",
         "index": pytest.approx(10, rel=0.1),
         "driver": "env_bpfo",
         "diagnosis": "outer race",
-        "alarm_at": ALARM_AT.isoformat(),
+        "alert_at": ALERT_AT.isoformat(),
+        "danger_at": None,
         "crosstalk_from": None,
     }
-    assert (healthy["condition"]["status"], healthy["condition"]["alarm_at"]) == ("ok", None)
+    assert (healthy["condition"]["status"], healthy["condition"]["alert_at"]) == ("ok", None)
 
 
 def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
@@ -166,10 +167,35 @@ def test_health_index_series_is_aligned_with_its_timestamps(tmp_path):
         zip(body["timestamps"], body["index"], body["driver"], body["status"], strict=True)
     )
     assert len(series) == SNAPSHOTS
-    # No index while the baseline is recorded, then the alarm from the moment it was raised.
+    # No index while the baseline is recorded, then the alert from the moment it was raised.
     assert series[0] == (START.isoformat(), None, None, "baseline")
     assert {status for _, _, _, status in series[:144]} == {"baseline"}
-    assert [t for t, _, _, status in series if status == "alarm"][0] == ALARM_AT.isoformat()
+    assert [t for t, _, _, status in series if status == "alert"][0] == ALERT_AT.isoformat()
+
+
+def test_health_index_is_the_largest_ratio_at_each_snapshot(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    ratios = client.get("/api/v1/experiments/set2/bearings/1/ratios").json()
+    health = client.get("/api/v1/experiments/set2/bearings/1/health-index").json()
+
+    assert ratios["timestamps"] == health["timestamps"]
+    by_feature = [ratios[name] for name in FEATURES]
+    largest = [None if v[0] is None else max(v) for v in zip(*by_feature, strict=True)]
+    assert largest == health["index"]
+    assert ratios["env_bpfo"][-1] == pytest.approx(10, rel=0.1)
+
+
+def test_ratios_take_the_worse_of_two_channels(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set1/bearings/3/ratios").json()
+
+    # Both channels grow by the same step; from the smaller baseline that is the larger ratio.
+    last, baseline_median = SNAPSHOTS - 1, 71.5 / 1000  # rms offset of snapshots 0-143
+    channel5, channel6 = ((c + last / 1000) / (c + baseline_median) for c in (5, 6))
+    assert channel5 > channel6
+    assert body["rms"][last] == round(channel5, 3)
 
 
 def condition_at(client: TestClient, path: str, at: datetime) -> dict[str, object]:
@@ -185,12 +211,24 @@ def test_condition_as_of_a_time_shows_what_was_known_then(tmp_path):
 
     learning = condition_at(client, path, START + timedelta(hours=12))
     rising = condition_at(client, path, FAULT_FROM + timedelta(minutes=30))
-    raised = condition_at(client, path, ALARM_AT + timedelta(minutes=5))
+    raised = condition_at(client, path, ALERT_AT + timedelta(minutes=5))
 
     assert (learning["status"], learning["index"]) == ("baseline", None)
-    assert (rising["status"], rising["alarm_at"]) == ("ok", None)
+    assert (rising["status"], rising["alert_at"]) == ("ok", None)
     # Between snapshots the answer comes from the latest one before.
-    assert (raised["status"], raised["as_of"]) == ("alarm", ALARM_AT.isoformat())
+    assert (raised["status"], raised["as_of"]) == ("alert", ALERT_AT.isoformat())
+
+
+def test_experiment_reports_its_machine_as_of_a_time(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    def machine(at=None):
+        params = {} if at is None else {"at": at.isoformat()}
+        return client.get("/api/v1/experiments/set2", params=params).json()["machine"]
+
+    assert machine(START + timedelta(hours=12)) == {"status": "baseline", "bearings": [1, 2]}
+    assert machine(FAULT_FROM + timedelta(minutes=30)) == {"status": "ok", "bearings": []}
+    assert machine() == {"status": "alert", "bearings": [1]}
 
 
 def test_at_applies_to_the_experiment_and_its_bearings_list(tmp_path):
@@ -259,7 +297,11 @@ def test_bearing_features_are_columnar_and_in_time_order(tmp_path):
 
     body = client.get("/api/v1/experiments/set2/bearings/1/features").json()
 
-    assert (body["experiment"], body["bearing"], body["failure"]) == ("set2", 1, "outer race")
+    assert (body["experiment"], body["bearing"], body["documented_failure"]) == (
+        "set2",
+        1,
+        "outer race",
+    )
     [channel] = body["channels"]
     assert channel["channel"] == 1
     assert channel["timestamps"] == sorted(channel["timestamps"])
@@ -287,12 +329,56 @@ def test_bearing_with_two_sensors_returns_both_channels(tmp_path):
         "/api/v1/experiments/set9/bearings/1/features",
         "/api/v1/experiments/set2/bearings/3/features",
         "/api/v1/experiments/set2/bearings/3/health-index",
+        "/api/v1/experiments/set2/bearings/3/ratios",
+        "/api/v1/experiments/set9/evaluation",
     ],
 )
 def test_unknown_experiment_or_bearing_is_404(tmp_path, path):
     client = make_client(frontend_dir=tmp_path)
 
     assert client.get(path).status_code == 404
+
+
+def test_evaluation_compares_each_alert_with_the_documented_end(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set2/evaluation").json()
+
+    # No stops in the synthetic run, so operating hours are wall-clock hours.
+    last = START + timedelta(minutes=10 * (SNAPSHOTS - 1))
+    lead = round((last - ALERT_AT).total_seconds() / 3600, 1)
+    assert body == {
+        "experiment": "set2",
+        "bearings": [
+            {
+                "bearing": 1,
+                "documented_failure": "outer race",
+                "verdict": "detected",
+                "alert_lead_op_h": lead,
+                "danger_lead_op_h": None,
+            },
+            {
+                "bearing": 2,
+                "documented_failure": None,
+                "verdict": "quiet",
+                "alert_lead_op_h": None,
+                "danger_lead_op_h": None,
+            },
+        ],
+        "failures": 1,
+        "failures_alerted": 1,
+        "survivors": 1,
+        "false_alarms": 0,
+    }
+
+
+def test_evaluation_counts_a_documented_failure_without_an_alert_as_missed(tmp_path):
+    client = make_client(frontend_dir=tmp_path)
+
+    body = client.get("/api/v1/experiments/set1/evaluation").json()
+
+    assert [(b["bearing"], b["verdict"]) for b in body["bearings"]] == [(3, "missed")]
+    assert (body["failures"], body["failures_alerted"]) == (1, 0)
 
 
 def test_feature_series_are_gzipped_when_the_client_accepts_it(tmp_path):

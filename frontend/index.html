@@ -4,9 +4,59 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bearing Health Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%231f1f1d' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23d03b3b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <!-- The basic bundle (scatter, log and date axes) is a third of the full one. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/3.1.2/plotly-basic.min.js"
+          integrity="sha512-5fhdiZUtCLk7Bqd0PHYVLzkkAtL/AYIoD7UBKBw+LtlrwhFEkYJfyg6OkSloVNxWxlo8AZ41Hm1nX+Q7RCIRxw=="
+          crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
-  <h1>Bearing Health Monitor</h1>
-  <p>Dashboard follows. API documentation: <a href="/docs">/docs</a></p>
+  <header>
+    <div>
+      <h1>Bearing Health Monitor</h1>
+      <p class="muted">NASA IMS run-to-failure tests · every bearing judged against its own first day</p>
+    </div>
+    <nav id="runs" class="segmented" aria-label="Test run"></nav>
+  </header>
+
+  <main>
+    <p id="run-info" class="muted"></p>
+    <!-- Stays in view while scrolling: the moment and the time range scope everything below. -->
+    <div id="run-bar">
+      <span id="machine"><small>Rig</small><span class="pill"></span></span>
+      <button id="play" class="play" aria-label="Replay the run">▶ Replay</button>
+      <input id="moment" type="range" min="0" max="0" step="1" value="0" aria-label="Moment shown">
+      <output id="as-of" for="moment"></output>
+      <div class="segmented" role="group" aria-label="Time range">
+        <button id="zoom-all" aria-pressed="true">Whole run</button>
+        <button id="zoom-final" aria-pressed="false">Final 100 h</button>
+      </div>
+    </div>
+    <section id="bearings" class="grid" aria-label="Bearings"></section>
+
+    <section id="overview" class="panel" hidden>
+      <div class="panel-head">
+        <h2 id="overview-title"></h2>
+        <p class="muted">Health index and status on one scale · click a lane for its features</p>
+      </div>
+      <p id="run-result"></p>
+      <div id="overview-chart"></div>
+    </section>
+
+    <section id="detail" class="panel" hidden>
+      <div class="panel-head">
+        <h2 id="detail-title"></h2>
+      </div>
+      <div id="chart"></div>
+    </section>
+
+    <p id="error" role="alert" hidden></p>
+  </main>
+
+  <footer class="muted">
+    <a href="/docs">API documentation</a> · version <span id="version">…</span>
+  </footer>
 </body>
 </html>

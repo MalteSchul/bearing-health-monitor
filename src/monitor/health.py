@@ -8,11 +8,12 @@ have seen at the time.
 from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from pydantic import Field
 
 from monitor.features import FEATURES
 
@@ -27,6 +28,9 @@ MAX_GAP = pd.Timedelta(minutes=30)
 # All bearings share one shaft and housing, so a fault reaches the other sensors too, weaker.
 # In set 2 the failing bearing showed its fault a median 7 x stronger than the loudest neighbour.
 CROSSTALK_FACTOR = 3.0
+# Danger also needs this to hold at THRESHOLD: a spreading defect raises the vibration energy, a
+# new one hardly does. Chosen after all runs had been seen, but it adds no new number.
+ENERGY = "rms"
 
 # The part whose impact rate each envelope feature measures. Time-domain features rise for any
 # fault, so they say that something changed but not where.
@@ -38,21 +42,32 @@ PARTS = {
 }
 ENVELOPE = [FEATURES.index(name) for name in PARTS]
 
-Status = Literal["baseline", "ok", "crosstalk", "alarm"]
+# alert: plan the replacement. danger: act now. crosstalk needs no action on this bearing.
+Status = Literal["baseline", "ok", "crosstalk", "alert", "danger"]
+
+# Without an example, Swagger UI invents the current time in UTC with a "Z".
+Timestamp = Annotated[
+    datetime,
+    Field(
+        description="Local time at the test rig. The dataset recorded no offset, so none is given.",
+        examples=["2004-02-16T04:00:00"],
+    ),
+]
 
 
 @dataclass(frozen=True)
 class Condition:
     """What the monitor says about one bearing, judged from the snapshots up to `as_of`."""
 
-    as_of: datetime
+    as_of: Timestamp
     status: Status
     # The largest feature ratio and the feature it comes from; None during the baseline.
     index: float | None = None
     driver: str | None = None
-    # Only for alarm and crosstalk: the part whose fault frequency stood out over the last hour.
+    # Not for baseline and ok: the part whose fault frequency stood out over the last hour.
     diagnosis: str | None = None
-    alarm_at: datetime | None = None
+    alert_at: Timestamp | None = None
+    danger_at: Timestamp | None = None
     # For crosstalk: the bearing whose fault this one picks up.
     crosstalk_from: int | None = None
 
@@ -70,6 +85,30 @@ class History:
             return self.conditions[-1]
         i = bisect_right(self.conditions, time, key=lambda c: c.as_of)
         return self.conditions[i - 1] if i else None
+
+
+# A bearing that only hears a neighbour needs no action, so crosstalk counts as ok here.
+MachineStatus = Literal["baseline", "ok", "alert", "danger"]
+# Most urgent first. A known danger outranks a bearing still learning; not knowing outranks ok.
+ESCALATION: tuple[MachineStatus, ...] = ("danger", "alert", "baseline")
+
+
+@dataclass(frozen=True)
+class MachineCondition:
+    status: MachineStatus
+    # The bearings at that status; none when the machine is ok.
+    bearings: list[int]
+
+
+def machine_condition(conditions: dict[int, Condition]) -> MachineCondition:
+    """The machine is as bad as its worst bearing: it is stopped and repaired as a whole, and an
+    average would let healthy bearings hide a failing one.
+    """
+    for status in ESCALATION:
+        bearings = sorted(b for b, c in conditions.items() if c.status == status)
+        if bearings:
+            return MachineCondition(status=status, bearings=bearings)
+    return MachineCondition(status="ok", bearings=[])
 
 
 def bearing_ratios(run: pd.DataFrame) -> pd.DataFrame:
@@ -158,11 +197,15 @@ def assess(run: pd.DataFrame) -> list[History]:
             for i, value in enumerate(values)
         ]
         elevated = held(values).tolist()
-        # An alarm needs an hour of the bearing's own evidence: snapshots that a louder neighbour
-        # explains do not count. One noisy hour must not latch an alarm for good.
-        alarming = held(values.mask(explained)).tolist()
+        # An alert needs an hour of the bearing's own evidence: snapshots that a louder neighbour
+        # explains do not count. One noisy hour must not latch an alert for good.
+        alerting = held(values.mask(explained)).tolist()
+        # Danger waits for the alert: energy reaches the neighbours almost undiminished (the
+        # source only 1.3 x louder in set 2), so only the alert's crosstalk check can place it.
+        energy = held(ratios.loc[bearing][ENERGY].round(3)).tolist()
 
-        alarm_at: datetime | None = None
+        alert_at: datetime | None = None
+        danger_at: datetime | None = None
         conditions = []
         for i, (time, value, driver) in enumerate(
             zip(own.index.to_pydatetime(), values, own["feature"], strict=True)
@@ -170,10 +213,16 @@ def assess(run: pd.DataFrame) -> list[History]:
             if np.isnan(value):
                 conditions.append(Condition(as_of=time, status="baseline"))
                 continue
-            if alarm_at is None and alarming[i]:
-                alarm_at = time
-            crosstalk = alarm_at is None and elevated[i]
-            status: Status = "alarm" if alarm_at is not None else "crosstalk" if crosstalk else "ok"
+            if alert_at is None and alerting[i]:
+                alert_at = time
+            if danger_at is None and alert_at is not None and energy[i]:
+                danger_at = time
+            crosstalk = alert_at is None and elevated[i]
+            status: Status = "crosstalk" if crosstalk else "ok"
+            if danger_at is not None:
+                status = "danger"
+            elif alert_at is not None:
+                status = "alert"
             source = loudest_neighbour(recent[i], position)[0] if crosstalk else None
             conditions.append(
                 Condition(
@@ -182,7 +231,8 @@ def assess(run: pd.DataFrame) -> list[History]:
                     index=float(value),
                     driver=str(driver),
                     diagnosis=None if status == "ok" else diagnose(recent[i, position]),
-                    alarm_at=alarm_at,
+                    alert_at=alert_at,
+                    danger_at=danger_at,
                     crosstalk_from=None if source is None else int(bearings[source]),
                 )
             )

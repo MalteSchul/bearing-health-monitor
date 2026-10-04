@@ -8,8 +8,19 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
+from monitor.evaluation import RunEvaluation, evaluate_run
 from monitor.features import FEATURES
-from monitor.health import THRESHOLD, Condition, History, Status, assess
+from monitor.health import (
+    THRESHOLD,
+    Condition,
+    History,
+    MachineCondition,
+    Status,
+    Timestamp,
+    assess,
+    bearing_ratios,
+    machine_condition,
+)
 from monitor.ims import EXPERIMENTS
 
 FAILURES = {e.name: e.failures for e in EXPERIMENTS}
@@ -20,15 +31,17 @@ class BearingSummary(BaseModel):
     channels: list[int]
     # Documented state at the end of the run, None if the bearing survived. For display only:
     # the detector must never see it.
-    failure: str | None
+    documented_failure: str | None
     condition: Condition
 
 
 class ExperimentSummary(BaseModel):
     name: str
-    first: datetime
-    last: datetime
+    first: Timestamp
+    last: Timestamp
     snapshots: int
+    # The test rig as a whole, as of the same moment as its bearings.
+    machine: MachineCondition
     bearings: list[BearingSummary]
 
 
@@ -36,7 +49,7 @@ class ChannelSeries(BaseModel):
     """One array per feature, aligned with timestamps: the shape Plotly traces take."""
 
     channel: int
-    timestamps: list[datetime]
+    timestamps: list[Timestamp]
     rms: list[float]
     peak: list[float]
     crest_factor: list[float]
@@ -50,7 +63,7 @@ class ChannelSeries(BaseModel):
 class BearingFeatures(BaseModel):
     experiment: str
     bearing: int
-    failure: str | None
+    documented_failure: str | None
     channels: list[ChannelSeries]
 
 
@@ -60,11 +73,30 @@ class HealthIndex(BaseModel):
     experiment: str
     bearing: int
     threshold: float
-    timestamps: list[datetime]
+    timestamps: list[Timestamp]
     # None while the baseline is being recorded.
     index: list[float | None]
     driver: list[str | None]
     status: list[Status]
+
+
+class FeatureRatios(BaseModel):
+    """What the detector compares: each feature over its baseline median, on the worse channel.
+
+    The health index is the largest of these at each snapshot. None while the baseline is recorded.
+    """
+
+    experiment: str
+    bearing: int
+    timestamps: list[Timestamp]
+    rms: list[float | None]
+    peak: list[float | None]
+    crest_factor: list[float | None]
+    kurtosis: list[float | None]
+    env_ftf: list[float | None]
+    env_bsf: list[float | None]
+    env_bpfo: list[float | None]
+    env_bpfi: list[float | None]
 
 
 class NoDataYet(LookupError):
@@ -113,23 +145,39 @@ def _health_index(experiment: str, history: History) -> HealthIndex:
     )
 
 
+def _ratios(experiment: str, bearing: int, ratios: pd.DataFrame) -> FeatureRatios:
+    # Rounded like the health index, so the two agree digit for digit.
+    rounded = ratios.round(3).astype(object).where(ratios.notna(), None)
+    return FeatureRatios(
+        experiment=experiment,
+        bearing=bearing,
+        timestamps=pd.DatetimeIndex(ratios.index).to_pydatetime().tolist(),
+        **{name: rounded[name].tolist() for name in FEATURES},
+    )
+
+
 def _bearing_summary(bearing: int, data: _Bearing, at: datetime | None) -> BearingSummary:
     condition = data.history.at(at)
     if condition is None:
         first = data.history.conditions[0].as_of
         raise NoDataYet(f"No condition before the first snapshot at {first.isoformat()}")
     return BearingSummary(
-        bearing=bearing, channels=data.channels, failure=data.failure, condition=condition
+        bearing=bearing,
+        channels=data.channels,
+        documented_failure=data.failure,
+        condition=condition,
     )
 
 
 def _experiment_summary(name: str, run: _Run, at: datetime | None = None) -> ExperimentSummary:
+    bearings = [_bearing_summary(bearing, data, at) for bearing, data in run.bearings.items()]
     return ExperimentSummary(
         name=name,
         first=run.first,
         last=run.last,
         snapshots=run.snapshots,
-        bearings=[_bearing_summary(bearing, data, at) for bearing, data in run.bearings.items()],
+        machine=machine_condition({b.bearing: b.condition for b in bearings}),
+        bearings=bearings,
     )
 
 
@@ -139,12 +187,21 @@ class FeatureStore:
         self._runs: dict[str, _Run] = {}
         self._features: dict[tuple[str, int], BearingFeatures] = {}
         self._health: dict[tuple[str, int], HealthIndex] = {}
+        self._ratios: dict[tuple[str, int], FeatureRatios] = {}
+        self._evaluations: dict[str, RunEvaluation] = {}
         for experiment_key, run in frame.groupby("experiment", observed=True):
             experiment = str(experiment_key)
             failures = FAILURES.get(experiment, {})
             # Judged once at startup: every condition depends only on data up to its snapshot,
             # so precomputing them all is the same as judging each snapshot live.
             histories = {h.bearing: h for h in assess(run)}
+            self._evaluations[experiment] = evaluate_run(
+                experiment,
+                [histories[b] for b in sorted(histories)],
+                run["timestamp"].drop_duplicates(),
+                failures,
+            )
+            ratios = bearing_ratios(run)
             bearings = {}
             for bearing in sorted(run["bearing"].unique().tolist()):
                 rows = run[run["bearing"] == bearing]
@@ -154,9 +211,15 @@ class FeatureStore:
                 ]
                 failure = failures.get(bearing)
                 self._features[(experiment, bearing)] = BearingFeatures(
-                    experiment=experiment, bearing=bearing, failure=failure, channels=channels
+                    experiment=experiment,
+                    bearing=bearing,
+                    documented_failure=failure,
+                    channels=channels,
                 )
                 self._health[(experiment, bearing)] = _health_index(experiment, histories[bearing])
+                self._ratios[(experiment, bearing)] = _ratios(
+                    experiment, bearing, ratios.loc[bearing]
+                )
                 bearings[bearing] = _Bearing(
                     channels=[c.channel for c in channels],
                     failure=failure,
@@ -193,3 +256,9 @@ class FeatureStore:
 
     def health_index(self, experiment: str, bearing: int) -> HealthIndex | None:
         return self._health.get((experiment, bearing))
+
+    def ratios(self, experiment: str, bearing: int) -> FeatureRatios | None:
+        return self._ratios.get((experiment, bearing))
+
+    def evaluation(self, experiment: str) -> RunEvaluation | None:
+        return self._evaluations.get(experiment)
