@@ -1131,7 +1131,7 @@ const CITATION = /\[(\d+)\]/;
 /** What a question is about: the selected bearing, or the whole rig. Follows the selection. */
 function renderScope() {
   const focus = state.bearing === null ? "the whole rig" : `bearing ${state.bearing}`;
-  $("ask-scope").textContent = `Focus: ${focus} · answers only from looked-up facts, each cited`;
+  $("ask-scope").textContent = `Focus: ${focus}`;
   const fitting = SUGGESTIONS.filter((s) => state.bearing !== null || !s.needsBearing);
   $("suggestions").replaceChildren(
     ...fitting.map(({ text }) => {
