@@ -284,7 +284,7 @@ button {
 }
 
 /* Its markup is rewritten when the condition changes: a press lands on the span that stays. */
-.facts * {
+.card .facts * {
   pointer-events: none;
 }
 
@@ -329,6 +329,19 @@ button {
 #overview-chart,
 #chart {
   margin-top: 12px;
+}
+
+.detail {
+  margin-top: 20px;
+}
+
+.detail-divider {
+  border-top: 1px solid var(--line);
+  margin: 0 0 18px;
+}
+
+.detail-head {
+  margin-bottom: 0;
 }
 
 /* While a run or bearing loads, the old view stays but steps back. */
