@@ -86,7 +86,6 @@ const VEIL = "rgba(246, 245, 241, 0.78)";
 // range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
 // asked: question, run, moment and bearing of the copilot answer on show, null before the first.
 // hindsight: whether the documented outcome is shown; off, the page is what an operator saw.
-// features: whether the bearing detail shows the features behind its health index.
 const state = {
   run: null,
   last: null,
@@ -100,7 +99,6 @@ const state = {
   range: null,
   asked: null,
   hindsight: false,
-  features: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -162,7 +160,6 @@ function remember() {
   if (state.bearing !== null) params.set("bearing", state.bearing);
   if (state.moment !== null) params.set("at", runTimes()[state.moment]);
   if (state.hindsight) params.set("hindsight", "1");
-  if (state.features) params.set("features", "1");
   history.replaceState(null, "", `?${params}`);
 }
 
@@ -567,12 +564,9 @@ function escalations(condition) {
   return marks;
 }
 
-/**
- * One bearing over the run: its health index, and with `ratios` the features behind it in two more
- * panels. Without them the index stands alone; the features are detail on demand.
- */
+/** One bearing over the run: its health index, and below it the features it is the largest of. */
 function drawChart(health, ratios, condition) {
-  const names = ratios === null ? [] : Object.keys(FEATURES);
+  const names = Object.keys(FEATURES);
   const { x, ys } = breakAtGaps(health.timestamps, [
     health.index,
     health.driver.map((d) => (d === null ? "" : FEATURES[d].label)),
@@ -581,8 +575,6 @@ function drawChart(health, ratios, condition) {
   const [index, driver, ...features] = ys;
   const cuts = longStops(health.timestamps);
   const marks = escalations(condition);
-  const domains = ratios === null ? [[0, 1]] : DOMAINS;
-  const axes = domains.map((_, k) => axisName(k));
 
   const traces = [
     {
@@ -624,7 +616,7 @@ function drawChart(health, ratios, condition) {
   ];
 
   const shapes = statusShapes(health.timestamps, health.status);
-  axes.forEach((axis) => {
+  ["y", "y2", "y3"].forEach((axis) => {
     shapes.push(
       thresholdShape(health.threshold, axis),
       ...momentShapes(marks, axis),
@@ -644,17 +636,13 @@ function drawChart(health, ratios, condition) {
   const annotations = [
     title(
       "Health index and status",
-      domains[0][1],
+      DOMAINS[0][1],
       `The largest feature over its baseline<br>alert: ${health.threshold}× for 1 h, not crosstalk<br>` +
         `danger: rms ${health.threshold}× as well`,
     ),
+    title("Envelope features", DOMAINS[1][1], "One per bearing part: the damaged part's rises"),
+    title("Time-domain features", DOMAINS[2][1], "Overall level and impulsiveness · rms decides danger"),
   ];
-  if (ratios !== null) {
-    annotations.push(
-      title("Envelope features", DOMAINS[1][1], "One per bearing part: the damaged part's rises"),
-      title("Time-domain features", DOMAINS[2][1], "Overall level and impulsiveness · rms decides danger"),
-    );
-  }
   const middle = millis(health.timestamps[Math.floor(health.timestamps.length / 2)]);
   marks.forEach((mark, k) => {
     // Towards the middle of the run: Plotly centres an "auto" label on its line and stretches the
@@ -679,7 +667,7 @@ function drawChart(health, ratios, condition) {
   annotations.push(...stopMarks(cuts));
 
   const layout = {
-    height: ratios === null ? 340 : 760,
+    height: 760,
     margin: MARGIN,
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "#ffffff",
@@ -688,11 +676,11 @@ function drawChart(health, ratios, condition) {
     hovermode: "x unified",
     hoversubplots: "axis",
     hoverlabel: { bgcolor: "rgba(255, 255, 255, 0.96)", bordercolor: GRID },
-    xaxis: timeAxis(cuts, axes.at(-1)),
+    xaxis: timeAxis(cuts, "y3"),
     shapes,
     annotations,
   };
-  domains.forEach((domain, k) => {
+  DOMAINS.forEach((domain, k) => {
     layout[`yaxis${k === 0 ? "" : k + 1}`] = logAxis(domain);
     layout[`legend${k === 0 ? "" : k + 1}`] = legendBeside(domain);
   });
@@ -1076,10 +1064,7 @@ function listen(id, handlers) {
 
 /** Shows one bearing in detail, or with null the whole rig. The selection is the copilot's focus. */
 async function selectBearing(bearing) {
-  const ratios =
-    bearing === null || !state.features
-      ? null
-      : await getJSON(`${API}/experiments/${state.run}/bearings/${bearing}/ratios`);
+  const ratios = bearing === null ? null : await getJSON(`${API}/experiments/${state.run}/bearings/${bearing}/ratios`);
   state.bearing = bearing;
   remember();
   renderCards();
@@ -1287,14 +1272,6 @@ async function start() {
       await drawOverview();
     }, false),
   );
-  $("features").addEventListener(
-    "change",
-    handle(async () => {
-      state.features = $("features").checked;
-      remember();
-      await selectBearing(state.bearing);
-    }),
-  );
   // Dragging the slider takes over from a running replay.
   $("moment").addEventListener("input", (event) => {
     playing = false;
@@ -1312,8 +1289,6 @@ async function start() {
   // Without a bearing in the address, the page opens on the whole rig: the machine first.
   const bearing = params.has("bearing") ? Number(params.get("bearing")) : null;
   showHindsight(params.get("hindsight") === "1");
-  state.features = params.get("features") === "1";
-  $("features").checked = state.features;
   await selectRun(run, bearing, params.get("at"));
 }
 
