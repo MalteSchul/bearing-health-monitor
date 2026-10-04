@@ -4,16 +4,25 @@
 
 const API = "/api/v1";
 
-// A colour is an action: grey wait, green nothing, amber plan the replacement, red act now.
-// Crosstalk is green because this bearing needs nothing; its band shows why the index is high.
-// band: legend name of the shading behind the health index, null for none.
+// Colour only where something needs doing, as in ISA-101 operator screens: amber plan the
+// replacement, red act now. Cards and the rig light stay grey otherwise, so an alarm stands out.
+// Crosstalk's band is green: the index is high, but this bearing needs nothing.
+// band: legend name of the shading behind the health index, null for none. Shades get stronger
+// with urgency, so on a washed-out projector danger still stands out and learning recedes.
 const STATUS = {
-  baseline: { label: "Learning", band: "learning", colour: "#8a8983", shade: "rgba(138, 137, 131, 0.22)" },
+  baseline: { label: "Learning", band: "learning", colour: "#8a8983", shade: "rgba(138, 137, 131, 0.13)" },
   ok: { label: "OK", band: null, colour: "#2e9d5b", shade: null },
-  crosstalk: { label: "OK", band: "crosstalk", colour: "#2e9d5b", shade: "rgba(46, 157, 91, 0.14)" },
-  alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.2)" },
-  danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.13)" },
+  crosstalk: { label: "OK", band: "crosstalk", colour: "#2e9d5b", shade: "rgba(46, 157, 91, 0.24)" },
+  alert: { label: "Alert", band: "alert", colour: "#d99a00", shade: "rgba(217, 154, 0, 0.28)" },
+  danger: { label: "Danger", band: "danger", colour: "#d03b3b", shade: "rgba(208, 59, 59, 0.32)" },
 };
+// What the number on a card means, shown on hovering its label. Worded as the copilot's facts on
+// the health index and baseline rules in knowledge.toml.
+const INDEX_MEANING =
+  "The largest of the bearing's 8 feature ratios: each feature divided by its median over the " +
+  "bearing's first 24 h. 1× means as on its first day.";
+// The alarms, with what each asks of the operator.
+const ACTIONS = { alert: "Plan the replacement", danger: "Reduce load or stop" };
 
 const ENVELOPE = {
   env_bpfo: { label: "outer race (BPFO)", colour: "#2a78d6" },
@@ -76,6 +85,7 @@ const VEIL = "rgba(246, 245, 241, 0.78)";
 // moment: index of the snapshot shown, null for the latest.
 // range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
 // asked: question, run, moment and bearing of the copilot answer on show, null before the first.
+// hindsight: whether the documented outcome is shown; off, the page is what an operator saw.
 const state = {
   run: null,
   last: null,
@@ -88,6 +98,7 @@ const state = {
   moment: null,
   range: null,
   asked: null,
+  hindsight: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -133,6 +144,9 @@ function renderRuns(experiments) {
     ...experiments.map((experiment) => {
       const button = document.createElement("button");
       button.textContent = runLabel(experiment.name);
+      button.title =
+        `${formatTime(experiment.first)} to ${formatTime(experiment.last)} · ` +
+        `${experiment.snapshots.toLocaleString("en")} one-second vibration snapshots`;
       button.dataset.run = experiment.name;
       button.addEventListener("click", handle(() => selectRun(experiment.name)));
       return button;
@@ -140,11 +154,12 @@ function renderRuns(experiments) {
   );
 }
 
-/** Run, bearing and moment in the address, so a view can be bookmarked and shared. */
+/** The view in the address, so it can be bookmarked and shared. */
 function remember() {
   const params = new URLSearchParams({ run: state.run });
   if (state.bearing !== null) params.set("bearing", state.bearing);
   if (state.moment !== null) params.set("at", runTimes()[state.moment]);
+  if (state.hindsight) params.set("hindsight", "1");
   history.replaceState(null, "", `?${params}`);
 }
 
@@ -187,9 +202,6 @@ async function selectRun(name, bearing = state.bearing, at = null) {
   for (const button of $("runs").children) {
     button.setAttribute("aria-pressed", String(button.dataset.run === name));
   }
-  $("run-info").textContent =
-    `${runLabel(name)} · ${formatTime(experiment.first)} to ${formatTime(experiment.last)} · ` +
-    `${experiment.snapshots.toLocaleString("en")} one-second vibration snapshots`;
 
   const numbers = experiment.bearings.map((b) => b.bearing);
   await selectBearing(numbers.includes(bearing) ? bearing : null);
@@ -211,37 +223,31 @@ function leads(result) {
 const listed = (items) =>
   items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 
-/** The run's result in one line. Hindsight, so it stays put while the replay moves. */
+/** The run's result in one line; each lane gives its bearing's. Stays put while the replay moves. */
 function renderResult() {
   const run = state.evaluation;
-  const leadHours = run.bearings
-    .filter((r) => r.verdict === "detected")
-    .map((r) => Math.round(r.alert_lead_op_h));
-  const ahead = leadHours.length ? ` (${listed(leadHours)} op-h before the run ended)` : "";
   $("run-result").textContent =
-    `Hindsight · documented failures alerted: ${run.failures_alerted} of ${run.failures}${ahead}` +
+    `Documented failures alerted: ${run.failures_alerted} of ${run.failures}` +
     ` · false alarms on survivors: ${run.false_alarms} of ${run.survivors}`;
 }
 
 // --- bearing cards ----------------------------------------------------------------------------
 
-function conditionFacts(condition) {
-  const facts = [];
-  if (condition.status === "baseline") facts.push("Recording its first 24 h as the reference");
-  if (condition.status === "ok") facts.push("No feature held above the alert threshold for 1 h");
+/**
+ * A card's one line, only where there is something to say: what an alarm asks and which part, or
+ * whose fault a high index comes from. When it was raised is in the chart.
+ */
+function cardLine(condition) {
+  if (condition.status in ACTIONS) {
+    const part = condition.diagnosis === null ? "" : ` · ${condition.diagnosis}`;
+    return `<strong>${ACTIONS[condition.status]}</strong>${part}`;
+  }
   if (condition.status === "crosstalk") {
     // Here the diagnosis is the part of the fault it hears, not one of its own.
     const fault = condition.diagnosis === null ? "fault" : `${condition.diagnosis} fault`;
-    facts.push(`Hears bearing ${condition.crosstalk_from}'s ${fault}: no action here`);
+    return `<span class="muted">Hears bearing ${condition.crosstalk_from}'s ${fault}</span>`;
   }
-  if (condition.status === "alert") facts.push("<strong>Plan the replacement</strong>");
-  if (condition.status === "danger") facts.push("<strong>Act now:</strong> reduce load or stop");
-  if (condition.alert_at !== null) facts.push(`Alert raised ${formatTime(condition.alert_at)}`);
-  if (condition.danger_at !== null) facts.push(`Danger raised ${formatTime(condition.danger_at)}`);
-  if (condition.diagnosis !== null && condition.status !== "crosstalk") {
-    facts.push(`Diagnosis: <strong>${condition.diagnosis}</strong>`);
-  }
-  return facts;
+  return "";
 }
 
 /** A card's frame, built once per run. A click needs press and release on the same element. */
@@ -256,10 +262,8 @@ function buildCard(bearing) {
       <span class="name">Bearing ${bearing}</span>
       <span class="pill"></span>
     </span>
-    <span class="index"><span class="value"></span><small>health index</small></span>
-    <span class="driver"></span>
-    <span class="facts"></span>
-    <span class="truth" title="From the dataset readme. The detector never sees it."></span>`;
+    <span class="index"><span class="value"></span><small title="${INDEX_MEANING}">health index ⓘ</small></span>
+    <span class="facts"></span>`;
   return card;
 }
 
@@ -275,22 +279,15 @@ function setMarkup(element, html) {
 function fillCard(card, summary) {
   const { condition } = summary;
   const status = STATUS[condition.status];
-  const result = resultOf(summary.bearing);
-  const lead = leads(result);
   const part = (name) => card.querySelector(`.${name}`);
+  const alarm = condition.status in ACTIONS;
   card.style.setProperty("--status", status.colour);
+  card.classList.toggle("alarm", alarm);
   card.setAttribute("aria-pressed", String(summary.bearing === state.bearing));
   part("pill").textContent = status.label;
+  part("pill").classList.toggle("calm", !alarm);
   part("value").textContent = condition.index === null ? "–" : `${condition.index.toFixed(1)}×`;
-  part("driver").textContent =
-    condition.driver === null ? " " : `driven by ${FEATURES[condition.driver].label}`;
-  setMarkup(part("facts"), conditionFacts(condition).join("<br>"));
-  setMarkup(
-    part("truth"),
-    `<small>Documented at the end · hindsight</small>
-    ${summary.documented_failure ?? "survived"} · <strong>${result.verdict}</strong>
-    ${lead === null ? "" : `<br>${lead}<br>before the run ended`}`,
-  );
+  setMarkup(part("facts"), cardLine(condition));
 }
 
 /**
@@ -402,9 +399,10 @@ function timeAxis(cuts, anchor) {
     hoverformat: "%Y-%m-%d %H:%M",
     nticks: 9,
     tickangle: 0,
+    // Times only on ticks less than a day apart: daily ticks all fall at midnight.
     tickformatstops: [
-      { dtickrange: [null, 86400000], value: "%b %d %H:%M" },
-      { dtickrange: [86400000, null], value: "%b %d" },
+      { dtickrange: [null, 43200000], value: "%b %d %H:%M" },
+      { dtickrange: [43200000, null], value: "%b %d" },
     ],
     gridcolor: GRID,
     tickfont: { color: MUTED },
@@ -566,6 +564,7 @@ function escalations(condition) {
   return marks;
 }
 
+/** One bearing over the run: its health index, and below it the features it is the largest of. */
 function drawChart(health, ratios, condition) {
   const names = Object.keys(FEATURES);
   const { x, ys } = breakAtGaps(health.timestamps, [
@@ -586,6 +585,8 @@ function drawChart(health, ratios, condition) {
       y: index,
       customdata: driver,
       legend: "legend",
+      // The panel's title names it; the legend explains only lines and shades without a label.
+      showlegend: false,
       line: { color: INK, width: 1.4 },
       hovertemplate: "<b>%{y:.2f}×</b> from %{customdata}<extra>health index</extra>",
     },
@@ -593,8 +594,6 @@ function drawChart(health, ratios, condition) {
       mode: "lines",
       line: { color: MUTED, width: 1, dash: "dash" },
     }),
-    key("alert raised", { mode: "lines", line: { color: STATUS.alert.colour, width: 1.5 } }),
-    key("danger raised", { mode: "lines", line: { color: STATUS.danger.colour, width: 1.5 } }),
     ...(cuts.length
       ? [key("stop ≥ 12 h, cut out", { mode: "lines", line: { color: STOP, width: 1, dash: "dot" } })]
       : []),
@@ -626,25 +625,23 @@ function drawChart(health, ratios, condition) {
   });
   shapes.push(...replayShapes(health.timestamps.at(-1)));
 
-  const title = { yshift: 8, font: { size: 13, color: INK, weight: 600 } };
+  // Short titles; the rule behind each panel shows on hovering the ⓘ.
+  const title = (text, y, explanation) =>
+    note(`${text} <span style="color:${MUTED}">ⓘ</span>`, 0, y, {
+      yshift: 8,
+      font: { size: 13, color: INK, weight: 600 },
+      hovertext: explanation,
+      hoverlabel: { bgcolor: "#ffffff", bordercolor: GRID, font: { color: INK } },
+    });
   const annotations = [
-    note(
-      `Health index and status · alert: ${health.threshold}× for 1 h on own evidence · ` +
-        `danger: rms ${health.threshold}× as well`,
-      0,
+    title(
+      "Health index and status",
       DOMAINS[0][1],
-      title,
+      `The largest feature over its baseline<br>alert: ${health.threshold}× for 1 h, not crosstalk<br>` +
+        `danger: rms ${health.threshold}× as well`,
     ),
-    note("Envelope features · one per bearing part", 0, DOMAINS[1][1], title),
-    note(
-      "Time-domain features · overall level and impulsiveness · rms decides danger",
-      0,
-      DOMAINS[2][1],
-      title,
-    ),
-    note("Click a name to hide its line,<br>double-click to show only that one.", 1.02, 0, {
-      font: { size: 11, color: MUTED },
-    }),
+    title("Envelope features", DOMAINS[1][1], "One per bearing part: the damaged part's rises"),
+    title("Time-domain features", DOMAINS[2][1], "Overall level and impulsiveness · rms decides danger"),
   ];
   const middle = millis(health.timestamps[Math.floor(health.timestamps.length / 2)]);
   marks.forEach((mark, k) => {
@@ -675,20 +672,18 @@ function drawChart(health, ratios, condition) {
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "#ffffff",
     font: { family: FONT, size: 12, color: INK },
-    // One hover label for all three panels: every value at that moment.
+    // One hover label for all panels: every value at that moment.
     hovermode: "x unified",
     hoversubplots: "axis",
     hoverlabel: { bgcolor: "rgba(255, 255, 255, 0.96)", bordercolor: GRID },
     xaxis: timeAxis(cuts, "y3"),
-    yaxis: logAxis(DOMAINS[0]),
-    yaxis2: logAxis(DOMAINS[1]),
-    yaxis3: logAxis(DOMAINS[2]),
-    legend: legendBeside(DOMAINS[0]),
-    legend2: legendBeside(DOMAINS[1]),
-    legend3: legendBeside(DOMAINS[2]),
     shapes,
     annotations,
   };
+  DOMAINS.forEach((domain, k) => {
+    layout[`yaxis${k === 0 ? "" : k + 1}`] = logAxis(domain);
+    layout[`legend${k === 0 ? "" : k + 1}`] = legendBeside(domain);
+  });
   return Plotly.react("chart", traces, layout, CONFIG);
 }
 
@@ -801,11 +796,15 @@ function drawOverview() {
         yshift: 2,
         font: { size: 13, color: INK, weight: selected ? 700 : 500 },
       }),
-      note(laneVerdict(summary), 1.02, (bottom + top) / 2, {
-        yanchor: "middle",
-        font: { size: 12, color: INK },
-      }),
     );
+    if (state.hindsight) {
+      annotations.push(
+        note(laneVerdict(summary), 1.02, (bottom + top) / 2, {
+          yanchor: "middle",
+          font: { size: 12, color: INK },
+        }),
+      );
+    }
   });
   shapes.push(...replayShapes(timestamps.at(-1)));
   annotations.push(...stopMarks(cuts));
@@ -954,9 +953,15 @@ function markMoment() {
   const times = runTimes();
   const latest = state.moment === null;
   const at = formatTime(times[state.moment ?? times.length - 1]);
-  const note = document.createElement("small");
-  note.textContent = latest ? "the whole run is known" : "dimmed: not known yet then";
-  $("as-of").replaceChildren(`${latest ? "Latest" : "As of"} ${at}`, note);
+  const label = `${latest ? "Latest" : "As of"} ${at}`;
+  if (latest) {
+    $("as-of").replaceChildren(label);
+  } else {
+    // Only while replaying: the veil over what came later needs saying.
+    const note = document.createElement("small");
+    note.textContent = "dimmed: not known yet then";
+    $("as-of").replaceChildren(label, note);
+  }
 }
 
 function markPlay() {
@@ -988,6 +993,7 @@ function renderMachine() {
   const which = named ? ` · bearing${bearings.length > 1 ? "s" : ""} ${listed(bearings)}` : "";
   const pill = $("machine").querySelector(".pill");
   pill.style.setProperty("--status", STATUS[status].colour);
+  pill.classList.toggle("calm", !named);
   pill.textContent = `${STATUS[status].label}${which}`;
 }
 
@@ -1068,14 +1074,13 @@ async function selectBearing(bearing) {
   $("copilot").hidden = false;
   // Shown before drawing: Plotly sizes a chart from its container.
   $("overview").hidden = false;
-  $("overview-title").textContent = `${runLabel(state.run)} · all bearings`;
   $("detail").hidden = bearing === null;
   if (bearing === null) {
     // Gone rather than hidden, so the replay and the time range leave it alone.
     Plotly.purge("chart");
     await drawOverview();
   } else {
-    $("detail-title").textContent = `${runLabel(state.run)} · Bearing ${bearing}`;
+    $("detail-title").textContent = `Bearing ${bearing}`;
     const summary = state.bearings.find((b) => b.bearing === bearing);
     await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
     listen("chart", {
@@ -1101,10 +1106,8 @@ const CITATION = /\[(\d+)\]/;
 
 /** What a question is about: the selected bearing, or the whole rig. Follows the selection. */
 function renderScope() {
-  $("ask-scope").textContent =
-    state.bearing === null
-      ? "About the whole rig at the moment shown · click a card to ask about one bearing · answers only from looked-up facts, each cited"
-      : `About the moment shown, with bearing ${state.bearing} in focus · click its card again for the whole rig · answers only from looked-up facts, each cited`;
+  const focus = state.bearing === null ? "the whole rig" : `bearing ${state.bearing}`;
+  $("ask-scope").textContent = `Focus: ${focus}`;
   const fitting = SUGGESTIONS.filter((s) => state.bearing !== null || !s.needsBearing);
   $("suggestions").replaceChildren(
     ...fitting.map(({ text }) => {
@@ -1159,6 +1162,7 @@ async function ask() {
     state.asked = asked;
     renderReply(body);
     setStatus("");
+    $("question").value = "";
   } catch (error) {
     setStatus(`Could not ask: ${error.message}`, true);
   } finally {
@@ -1167,15 +1171,16 @@ async function ask() {
 }
 
 /**
- * The answer as text, with each [n] made a link to fact n. The model's text is never parsed as
- * HTML, so whatever it writes stays text; a number that is no fact stays text too, marked.
+ * The answer as text, with each [n] made a link to fact n that shows the fact on hover. The model's
+ * text is never parsed as HTML, so whatever it writes stays text; a number that is no fact stays
+ * text too, marked.
  */
-function answerParts(text, ids) {
+function answerParts(text, facts) {
   return text.split(CITATION).map((part, k) => {
     // split keeps the captured numbers at the odd positions.
     if (k % 2 === 0) return document.createTextNode(part);
     const id = Number(part);
-    if (!ids.has(id)) {
+    if (!facts.has(id)) {
       const unknown = document.createElement("span");
       unknown.className = "unknown-citation";
       unknown.title = "No fact with this number was looked up";
@@ -1185,6 +1190,7 @@ function answerParts(text, ids) {
     const link = document.createElement("a");
     link.href = `#fact-${id}`;
     link.textContent = `[${id}]`;
+    link.title = facts.get(id).text;
     link.addEventListener("click", (event) => {
       event.preventDefault();
       showFact(id);
@@ -1193,10 +1199,11 @@ function answerParts(text, ids) {
   });
 }
 
-/** Scrolls to a cited fact and marks it, so a sentence can be checked against what it rests on. */
+/** Opens and marks a cited fact, so a sentence can be checked against what it rests on. */
 function showFact(id) {
   for (const item of $("reply").querySelectorAll("[aria-current]")) item.removeAttribute("aria-current");
   const item = $(`fact-${id}`);
+  item.closest("details").open = true;
   item.setAttribute("aria-current", "true");
   item.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1213,13 +1220,16 @@ function factItem(source) {
   return item;
 }
 
-/** The cited facts in view, every other fact folded away: without an answer, open. */
+/**
+ * The answer first, its facts folded away: the cited ones and every other one looked up. Without an
+ * answer the facts are all there is, so they open.
+ */
 function renderReply(reply) {
-  const ids = new Set(reply.sources.map((source) => source.id));
+  const facts = new Map(reply.sources.map((source) => [source.id, source]));
   const cited = new Set(
     [...(reply.answer ?? "").matchAll(new RegExp(CITATION, "g"))]
       .map((match) => Number(match[1]))
-      .filter((id) => ids.has(id)),
+      .filter((id) => facts.has(id)),
   );
   const { question, run, moment, bearing, time } = state.asked;
   const asked = document.createElement("strong");
@@ -1228,9 +1238,13 @@ function renderReply(reply) {
   const scope = bearing === null ? "whole rig" : `bearing ${bearing} in focus`;
   $("reply-label").replaceChildren(asked, ` · ${runLabel(run)} as of ${formatTime(time)}${end} · ${scope}`);
   $("answer").hidden = reply.answer === null;
-  $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, ids)));
+  $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, facts)));
   $("answer-note").textContent = reply.note ?? "";
-  $("cited").replaceChildren(...reply.sources.filter((s) => cited.has(s.id)).map(factItem));
+  const citedFold = $("cited-facts");
+  citedFold.hidden = cited.size === 0;
+  citedFold.open = false;
+  citedFold.querySelector("summary").textContent = `Cited facts (${cited.size})`;
+  citedFold.querySelector("ul").replaceChildren(...reply.sources.filter((s) => cited.has(s.id)).map(factItem));
   const others = reply.sources.filter((s) => !cited.has(s.id));
   const folded = $("other-facts");
   folded.querySelector("summary").textContent =
@@ -1260,6 +1274,14 @@ async function start() {
     ask();
   });
   watchLaneClicks();
+  $("hindsight").addEventListener(
+    "change",
+    handle(async () => {
+      showHindsight($("hindsight").checked);
+      remember();
+      await drawOverview();
+    }, false),
+  );
   // Dragging the slider takes over from a running replay.
   $("moment").addEventListener("input", (event) => {
     playing = false;
@@ -1276,7 +1298,15 @@ async function start() {
   const run = names.includes(params.get("run")) ? params.get("run") : names[0];
   // Without a bearing in the address, the page opens on the whole rig: the machine first.
   const bearing = params.has("bearing") ? Number(params.get("bearing")) : null;
+  showHindsight(params.get("hindsight") === "1");
   await selectRun(run, bearing, params.get("at"));
+}
+
+/** The run's result line follows at once; the lane verdicts need the overview redrawn. */
+function showHindsight(on) {
+  state.hindsight = on;
+  $("hindsight").checked = on;
+  $("run-result").hidden = !on;
 }
 
 handle(start)();

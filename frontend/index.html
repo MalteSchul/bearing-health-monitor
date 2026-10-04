@@ -13,34 +13,37 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Bearing Health Monitor</h1>
-      <p class="muted">NASA IMS run-to-failure tests · every bearing judged against its own first day</p>
-    </div>
-    <nav id="runs" class="segmented" aria-label="Test run"></nav>
-  </header>
-
-  <main>
-    <p id="run-info" class="muted"></p>
-    <!-- Stays in view while scrolling: the moment and the time range scope everything below. -->
-    <div id="run-bar">
-      <span id="machine"><small>Rig</small><span class="pill"></span></span>
+  <!-- Above the monitor, not part of it: the bench that plays a recording into it. -->
+  <div id="bench">
+    <!-- The test bench: which recording, which moment, and what was found after the run. An
+         operator watching a live machine has none of this. Stays in view while scrolling. -->
+    <div id="playback" role="group" aria-label="Recorded test">
+      <small>Recorded NASA IMS test</small>
+      <nav id="runs" class="segmented" aria-label="Test run"></nav>
       <button id="play" class="play" aria-label="Replay the run">▶ Replay</button>
       <input id="moment" type="range" min="0" max="0" step="1" value="0" aria-label="Moment shown">
       <output id="as-of" for="moment"></output>
-      <div class="segmented" role="group" aria-label="Time range">
-        <button id="zoom-all" aria-pressed="true">Whole run</button>
-        <button id="zoom-final" aria-pressed="false">Final 100 h</button>
-      </div>
+      <label class="switch"><input id="hindsight" type="checkbox"> Show hindsight</label>
     </div>
+  </div>
+
+  <header>
+    <h1>Bearing Health Monitor</h1>
+  </header>
+
+  <main>
+    <!-- At the top of the monitor, where it is seen: a failed load leaves the rest as it was. -->
+    <p id="error" role="alert" hidden></p>
+
+    <!-- From here on: what an operator would see at the moment shown. -->
+    <p id="machine"><small>Rig</small><span class="pill"></span></p>
     <section id="bearings" class="grid" aria-label="Bearings"></section>
 
-    <section id="copilot" class="panel" aria-labelledby="copilot-title" hidden>
-      <div class="panel-head">
+    <details id="copilot" class="panel" aria-labelledby="copilot-title" hidden>
+      <summary class="panel-head">
         <h2 id="copilot-title">Ask the copilot</h2>
-        <p id="ask-scope" class="muted"></p>
-      </div>
+      </summary>
+      <p id="ask-scope" class="muted"></p>
       <form id="ask">
         <input id="question" type="text" maxlength="500" required autocomplete="off"
                aria-label="Question" placeholder="Ask about the moment shown, in any language">
@@ -53,31 +56,40 @@
         <p id="stale-note" hidden>The dashboard now shows another moment than this answer: ask again for it.</p>
         <p id="answer"></p>
         <p id="answer-note"></p>
-        <ul id="cited" class="fact-list" aria-label="Cited facts"></ul>
-        <details id="other-facts">
+        <details id="cited-facts" class="facts">
+          <summary></summary>
+          <ul class="fact-list"></ul>
+        </details>
+        <details id="other-facts" class="facts">
           <summary></summary>
           <ul class="fact-list"></ul>
         </details>
       </div>
-    </section>
+    </details>
 
     <section id="overview" class="panel" hidden>
       <div class="panel-head">
-        <h2 id="overview-title"></h2>
-        <p class="muted">Health index and status on one scale · click a lane for its features</p>
+        <h2>All bearings</h2>
+        <p class="muted">Click a lane for its detail</p>
+        <div class="panel-tools">
+          <!-- Zooms both charts, which share their time axis. -->
+          <div class="segmented" role="group" aria-label="Time range">
+            <button id="zoom-all" aria-pressed="true">Whole run</button>
+            <button id="zoom-final" aria-pressed="false">Final 100 h</button>
+          </div>
+        </div>
       </div>
-      <p id="run-result"></p>
+      <p id="run-result" hidden></p>
       <div id="overview-chart"></div>
-    </section>
 
-    <section id="detail" class="panel" hidden>
-      <div class="panel-head">
-        <h2 id="detail-title"></h2>
+      <div id="detail" class="detail" hidden>
+        <div class="detail-divider"></div>
+        <div class="panel-head detail-head">
+          <h2 id="detail-title"></h2>
+        </div>
+        <div id="chart"></div>
       </div>
-      <div id="chart"></div>
     </section>
-
-    <p id="error" role="alert" hidden></p>
   </main>
 
   <footer class="muted">
