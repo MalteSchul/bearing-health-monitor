@@ -80,26 +80,26 @@ def create_app(settings: Settings | None = None, writer: Writer | None = None) -
         return {"commit": settings.commit_sha}
 
     # Every run used new bearings, so a bearing is only unique within its experiment.
-    v1 = APIRouter(prefix=f"{API_PREFIX}/v1", tags=["bearings"])
+    bearing_api = APIRouter(tags=["bearings"])
 
-    @v1.get("/experiments")
+    @bearing_api.get("/experiments")
     def experiments() -> list[ExperimentSummary]:
         return store.experiments()
 
-    @v1.get("/experiments/{experiment}")
+    @bearing_api.get("/experiments/{experiment}")
     def experiment_summary(experiment: str, at: AsOf = None) -> ExperimentSummary:
         summary = store.experiment(experiment, at)
         if summary is None:
             raise HTTPException(404, f"Unknown experiment {experiment!r}")
         return summary
 
-    @v1.get("/experiments/{experiment}/bearings")
+    @bearing_api.get("/experiments/{experiment}/bearings")
     def bearings(experiment: str, at: AsOf = None) -> list[BearingSummary]:
         return experiment_summary(experiment, at).bearings
 
     # Hindsight, unlike the conditions: it compares with the state documented at the end of the
     # run, so it has no `at`.
-    @v1.get("/experiments/{experiment}/evaluation")
+    @bearing_api.get("/experiments/{experiment}/evaluation")
     def experiment_evaluation(experiment: str) -> RunEvaluation:
         evaluation = store.evaluation(experiment)
         if evaluation is None:
@@ -109,14 +109,14 @@ def create_app(settings: Settings | None = None, writer: Writer | None = None) -
     def no_bearing(experiment: str, bearing: int) -> HTTPException:
         return HTTPException(404, f"No bearing {bearing} in experiment {experiment!r}")
 
-    @v1.get("/experiments/{experiment}/bearings/{bearing}")
+    @bearing_api.get("/experiments/{experiment}/bearings/{bearing}")
     def bearing_summary(experiment: str, bearing: int, at: AsOf = None) -> BearingSummary:
         summary = store.bearing(experiment, bearing, at)
         if summary is None:
             raise no_bearing(experiment, bearing)
         return summary
 
-    @v1.get("/experiments/{experiment}/bearings/{bearing}/features")
+    @bearing_api.get("/experiments/{experiment}/bearings/{bearing}/features")
     def bearing_features(experiment: str, bearing: int) -> BearingFeatures:
         features = store.features(experiment, bearing)
         if features is None:
@@ -124,7 +124,7 @@ def create_app(settings: Settings | None = None, writer: Writer | None = None) -
         return features
 
     # Not "/health": that is the liveness probe. This is the series behind each condition.
-    @v1.get("/experiments/{experiment}/bearings/{bearing}/health-index")
+    @bearing_api.get("/experiments/{experiment}/bearings/{bearing}/health-index")
     def bearing_health_index(experiment: str, bearing: int) -> HealthIndex:
         health = store.health_index(experiment, bearing)
         if health is None:
@@ -132,16 +132,18 @@ def create_app(settings: Settings | None = None, writer: Writer | None = None) -
         return health
 
     # Served, not recomputed in the browser: the baseline rule lives in one place.
-    @v1.get("/experiments/{experiment}/bearings/{bearing}/ratios")
+    @bearing_api.get("/experiments/{experiment}/bearings/{bearing}/ratios")
     def bearing_ratios(experiment: str, bearing: int) -> FeatureRatios:
         ratios = store.ratios(experiment, bearing)
         if ratios is None:
             raise no_bearing(experiment, bearing)
         return ratios
 
+    copilot_api = APIRouter(tags=["copilot"])
+
     # The run, not a bearing: the bearings share a shaft and the answer draws on all of them.
     # POST, because every call costs money and the answer can differ each time.
-    @v1.post("/experiments/{experiment}/copilot", tags=["copilot"])
+    @copilot_api.post("/experiments/{experiment}/copilot")
     def ask_copilot(experiment: str, question: Question, at: AsOf = None) -> CopilotAnswer:
         try:
             answer = copilot.ask(experiment, question, at)
@@ -159,6 +161,12 @@ def create_app(settings: Settings | None = None, writer: Writer | None = None) -
     @app.exception_handler(NoDataYet)
     def no_data_yet(request: Request, exc: NoDataYet) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    # The version is the prefix, the tags only group the docs: one router per version holds the
+    # topic routers. Routes are copied on inclusion, so this comes after they are all declared.
+    v1 = APIRouter(prefix=f"{API_PREFIX}/v1")
+    v1.include_router(bearing_api)
+    v1.include_router(copilot_api)
 
     app.include_router(system)
     app.include_router(v1)
