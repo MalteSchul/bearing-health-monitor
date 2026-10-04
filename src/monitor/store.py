@@ -9,7 +9,15 @@ import pandas as pd
 from pydantic import BaseModel
 
 from monitor.features import FEATURES
-from monitor.health import THRESHOLD, Condition, History, Status, assess, bearing_ratios
+from monitor.health import (
+    THRESHOLD,
+    Condition,
+    History,
+    Status,
+    Timestamp,
+    assess,
+    bearing_ratios,
+)
 from monitor.ims import EXPERIMENTS
 
 FAILURES = {e.name: e.failures for e in EXPERIMENTS}
@@ -26,8 +34,8 @@ class BearingSummary(BaseModel):
 
 class ExperimentSummary(BaseModel):
     name: str
-    first: datetime
-    last: datetime
+    first: Timestamp
+    last: Timestamp
     snapshots: int
     bearings: list[BearingSummary]
 
@@ -36,7 +44,7 @@ class ChannelSeries(BaseModel):
     """One array per feature, aligned with timestamps: the shape Plotly traces take."""
 
     channel: int
-    timestamps: list[datetime]
+    timestamps: list[Timestamp]
     rms: list[float]
     peak: list[float]
     crest_factor: list[float]
@@ -60,7 +68,7 @@ class HealthIndex(BaseModel):
     experiment: str
     bearing: int
     threshold: float
-    timestamps: list[datetime]
+    timestamps: list[Timestamp]
     # None while the baseline is being recorded.
     index: list[float | None]
     driver: list[str | None]
@@ -75,7 +83,7 @@ class FeatureRatios(BaseModel):
 
     experiment: str
     bearing: int
-    timestamps: list[datetime]
+    timestamps: list[Timestamp]
     rms: list[float | None]
     peak: list[float | None]
     crest_factor: list[float | None]

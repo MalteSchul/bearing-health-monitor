@@ -8,11 +8,12 @@ have seen at the time.
 from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from pydantic import Field
 
 from monitor.features import FEATURES
 
@@ -40,19 +41,28 @@ ENVELOPE = [FEATURES.index(name) for name in PARTS]
 
 Status = Literal["baseline", "ok", "crosstalk", "alarm"]
 
+# Without an example, Swagger UI invents the current time in UTC with a "Z".
+Timestamp = Annotated[
+    datetime,
+    Field(
+        description="Local time at the test rig. The dataset recorded no offset, so none is given.",
+        examples=["2004-02-16T04:00:00"],
+    ),
+]
+
 
 @dataclass(frozen=True)
 class Condition:
     """What the monitor says about one bearing, judged from the snapshots up to `as_of`."""
 
-    as_of: datetime
+    as_of: Timestamp
     status: Status
     # The largest feature ratio and the feature it comes from; None during the baseline.
     index: float | None = None
     driver: str | None = None
     # Only for alarm and crosstalk: the part whose fault frequency stood out over the last hour.
     diagnosis: str | None = None
-    alarm_at: datetime | None = None
+    alarm_at: Timestamp | None = None
     # For crosstalk: the bearing whose fault this one picks up.
     crosstalk_from: int | None = None
 
