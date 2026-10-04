@@ -74,6 +74,7 @@ const VEIL = "rgba(246, 245, 241, 0.78)";
 // evaluation: the run's verdicts against the documented end, hindsight whatever the moment.
 // moment: index of the snapshot shown, null for the latest.
 // range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
+// asked: question, run, moment and bearing of the copilot answer on show, null before the first.
 const state = {
   run: null,
   last: null,
@@ -85,6 +86,7 @@ const state = {
   evaluation: null,
   moment: null,
   range: null,
+  asked: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -179,6 +181,7 @@ async function selectRun(name, bearing = state.bearing, at = null) {
   $("moment").max = String(last);
   $("moment").value = String(index);
   markMoment();
+  markReply();
   for (const button of $("runs").children) {
     button.setAttribute("aria-pressed", String(button.dataset.run === name));
   }
@@ -1006,6 +1009,7 @@ async function showMoment(index) {
   state.moment = index >= runTimes().length - 1 ? null : index;
   $("moment").value = String(index);
   markMoment();
+  markReply();
   remember();
   await Promise.all([moveVeil(), loadMoment()]);
 }
@@ -1057,6 +1061,9 @@ async function selectBearing(bearing) {
   markRange();
 
   const summary = state.bearings.find((b) => b.bearing === bearing);
+  $("copilot").hidden = false;
+  $("ask-scope").textContent =
+    `About the moment shown, with bearing ${bearing} in focus · answers only from looked-up facts, each cited`;
   // Shown before drawing: Plotly sizes a chart from its container.
   $("overview").hidden = false;
   $("overview-title").textContent = `${runLabel(state.run)} · all bearings`;
@@ -1072,12 +1079,173 @@ async function selectBearing(bearing) {
   });
 }
 
+// --- copilot ----------------------------------------------------------------------------------
+
+// A click asks: nothing is asked on its own, since every answer is a paid model call.
+const SUGGESTIONS = [
+  "Which bearing is the problem?",
+  "What is wrong with this bearing?",
+  "Is it getting worse?",
+  "What should I do now?",
+];
+const CITATION = /\[(\d+)\]/;
+
+function renderSuggestions() {
+  $("suggestions").replaceChildren(
+    ...SUGGESTIONS.map((text) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.addEventListener("click", () => {
+        $("question").value = text;
+        ask();
+      });
+      return button;
+    }),
+  );
+}
+
+function setAsking(asking) {
+  for (const button of [$("ask-button"), ...$("suggestions").children]) button.disabled = asking;
+  $("ask-button").textContent = asking ? "Asking…" : "Ask";
+}
+
+function setStatus(text, error = false) {
+  $("copilot-status").textContent = text;
+  $("copilot-status").classList.toggle("error", error);
+}
+
+/**
+ * Asks about the moment shown, with the selected bearing in focus. A running replay stops first,
+ * so the answer and the dashboard stay on the same moment.
+ */
+async function ask() {
+  const question = $("question").value.trim();
+  if (!question || $("ask-button").disabled) return;
+  playing = false;
+  const at = state.moment === null ? null : runTimes()[state.moment];
+  const asked = { question, run: state.run, moment: state.moment, bearing: state.bearing, time: at ?? state.last };
+  setAsking(true);
+  $("reply").hidden = true;
+  setStatus("The copilot is looking up the facts and writing an answer…");
+  try {
+    const query = at === null ? "" : `?at=${encodeURIComponent(at)}`;
+    const response = await fetch(`${API}/experiments/${asked.run}/copilot${query}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, bearing: asked.bearing }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      // A 429 says to wait a minute; the API words every refusal for the user.
+      throw new Error(typeof body.detail === "string" ? body.detail : `${response.status} ${response.statusText}`);
+    }
+    state.asked = asked;
+    renderReply(body);
+    setStatus("");
+  } catch (error) {
+    setStatus(`Could not ask: ${error.message}`, true);
+  } finally {
+    setAsking(false);
+  }
+}
+
+/**
+ * The answer as text, with each [n] made a link to fact n. The model's text is never parsed as
+ * HTML, so whatever it writes stays text; a number that is no fact stays text too, marked.
+ */
+function answerParts(text, ids) {
+  return text.split(CITATION).map((part, k) => {
+    // split keeps the captured numbers at the odd positions.
+    if (k % 2 === 0) return document.createTextNode(part);
+    const id = Number(part);
+    if (!ids.has(id)) {
+      const unknown = document.createElement("span");
+      unknown.className = "unknown-citation";
+      unknown.title = "No fact with this number was looked up";
+      unknown.textContent = `[${part}]`;
+      return unknown;
+    }
+    const link = document.createElement("a");
+    link.href = `#fact-${id}`;
+    link.textContent = `[${id}]`;
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      showFact(id);
+    });
+    return link;
+  });
+}
+
+/** Scrolls to a cited fact and marks it, so a sentence can be checked against what it rests on. */
+function showFact(id) {
+  for (const item of $("reply").querySelectorAll("[aria-current]")) item.removeAttribute("aria-current");
+  const item = $(`fact-${id}`);
+  item.setAttribute("aria-current", "true");
+  item.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function factItem(source) {
+  const item = document.createElement("li");
+  item.id = `fact-${source.id}`;
+  const number = document.createElement("span");
+  number.className = "fact-id";
+  number.textContent = `[${source.id}]`;
+  const ref = document.createElement("small");
+  ref.textContent = source.ref;
+  item.append(number, ` ${source.text}`, ref);
+  return item;
+}
+
+/** The cited facts in view, every other fact folded away: without an answer, open. */
+function renderReply(reply) {
+  const ids = new Set(reply.sources.map((source) => source.id));
+  const cited = new Set(
+    [...(reply.answer ?? "").matchAll(new RegExp(CITATION, "g"))]
+      .map((match) => Number(match[1]))
+      .filter((id) => ids.has(id)),
+  );
+  const { question, run, moment, bearing, time } = state.asked;
+  const asked = document.createElement("strong");
+  asked.textContent = `“${question}”`;
+  const end = moment === null ? " (latest)" : "";
+  $("reply-label").replaceChildren(
+    asked,
+    ` · ${runLabel(run)} as of ${formatTime(time)}${end} · bearing ${bearing} in focus`,
+  );
+  $("answer").hidden = reply.answer === null;
+  $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, ids)));
+  $("answer-note").textContent = reply.note ?? "";
+  $("cited").replaceChildren(...reply.sources.filter((s) => cited.has(s.id)).map(factItem));
+  const others = reply.sources.filter((s) => !cited.has(s.id));
+  const folded = $("other-facts");
+  folded.querySelector("summary").textContent =
+    `${cited.size ? "Other facts looked up" : "Facts looked up"} (${others.length})`;
+  folded.querySelector("ul").replaceChildren(...others.map(factItem));
+  folded.open = reply.answer === null;
+  $("reply").hidden = false;
+  markReply();
+}
+
+/** Greys an answer out once the dashboard shows another run or moment than it was about. */
+function markReply() {
+  if (state.asked === null) return;
+  const stale = state.asked.run !== state.run || state.asked.moment !== state.moment;
+  $("reply").classList.toggle("stale", stale);
+  $("stale-note").hidden = !stale;
+}
+
 // --- start ------------------------------------------------------------------------------------
 
 async function start() {
   $("zoom-all").addEventListener("click", () => showRange(null));
   $("zoom-final").addEventListener("click", () => showRange("final"));
   $("play").addEventListener("click", handle(play, false));
+  $("ask").addEventListener("submit", (event) => {
+    event.preventDefault();
+    ask();
+  });
+  renderSuggestions();
   watchLaneClicks();
   // Dragging the slider takes over from a running replay.
   $("moment").addEventListener("input", (event) => {
