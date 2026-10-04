@@ -439,7 +439,7 @@ def test_copilot_without_a_key_returns_the_facts_but_no_answer(tmp_path):
     assert (rig["id"], rig["kind"], rig["text"]) == (1, "detector", "Rig: alert, from bearing 1.")
     assert first["text"].startswith(f"Bearing 1: alert since {ALERT_AT:%Y-%m-%d %H:%M}")
     texts = [s["text"] for s in body["sources"]]
-    assert "For bearing 1 (alert): Alert (yellow)" in " ".join(texts), "explained, and for whom"
+    assert "For bearing 1 (alert): Alert (amber)" in " ".join(texts), "explained, and for whom"
     assert any("2,000 rpm" in t for t in texts), "machine facts always included"
 
 

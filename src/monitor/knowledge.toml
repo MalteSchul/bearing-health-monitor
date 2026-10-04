@@ -12,7 +12,8 @@ ims-readme = "NASA IMS Bearing Data readme (J. Lee, H. Qiu, G. Yu, J. Lin, Rexno
 ims-checked = "NASA IMS Bearing Data readme, corrected after checking the data"
 qiu-2006 = "Qiu, Lee, Lin: Wavelet filter-based weak signature detection, J. Sound Vib. 289 (2006)"
 iso-15243 = "ISO 15243, Rolling bearings: damage and failures, terms, characteristics and causes"
-iso-20816 = "ISO 20816-1, Mechanical vibration: measurement and evaluation of machine vibration"
+# The standard grades vibration in zones and says what each zone allows; the actions are ours.
+iso-20816-zones = "This monitor's actions, modelled on evaluation zones C and D of ISO 20816-1 (Mechanical vibration: measurement and evaluation of machine vibration)"
 skf-damage = "SKF, Bearing damage and failure analysis"
 textbook = "Randall, Vibration-based condition monitoring (2nd ed., 2021)"
 detector = "This monitor's detector"
@@ -86,7 +87,7 @@ out = { DECIDED_BY = ["baseline rule"] }
 id = "ok"
 label = "Status"
 source = "detector"
-text = "OK (green): no feature has held at 2x its baseline for an hour on the bearing's own evidence; no action."
+text = "OK (green): the health index has not held at 2x or more for an hour; no action."
 out = { DECIDED_BY = ["alert rule"] }
 
 [[node]]
@@ -100,7 +101,7 @@ out = { DECIDED_BY = ["crosstalk rule"], REQUIRES = ["follow the source"], SEE_A
 id = "alert"
 label = "Status"
 source = "detector"
-text = "Alert (yellow): a fault on this bearing has been detected; plan the replacement."
+text = "Alert (amber): a fault on this bearing has been detected; plan the replacement."
 out = { DECIDED_BY = ["alert rule", "diagnosis rule"], REQUIRES = ["plan the replacement", "inspect every bearing"], LIMITED_BY = ["equal loudness"], SEE_ALSO = ["no recovery"] }
 
 [[node]]
@@ -136,7 +137,7 @@ out = { BUILDS_ON = ["health index rule"] }
 id = "danger rule"
 label = "Rule"
 source = "detector"
-text = "Danger is raised when an alerted bearing's rms, its overall vibration energy, has also held at 2x or more for one hour."
+text = "Danger is raised when an alerted bearing's rms, its overall vibration energy, has also held at 2x or more for one hour. Energy reaches the neighbouring bearings almost undiminished, so rms alone cannot tell which bearing it comes from; that is why danger waits for the bearing's own alert."
 out = { BUILDS_ON = ["alert rule"] }
 
 [[node]]
@@ -183,14 +184,14 @@ text = "All bearings of one type share the same fault frequencies, so a frequenc
 [[node]]
 id = "plan the replacement"
 label = "Action"
-source = "iso-20816"
+source = "iso-20816-zones"
 text = "Plan the replacement: order the bearing and change it at the rig's next stop."
 out = { SCHEDULED_BY = ["one stop"] }
 
 [[node]]
 id = "act now"
 label = "Action"
-source = "iso-20816"
+source = "iso-20816-zones"
 text = "Act now: reduce the load or stop as soon as it is safe, and replace the bearing; running on risks damage to the shaft, housing and neighbouring parts."
 out = { SCHEDULED_BY = ["one stop"] }
 
