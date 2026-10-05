@@ -29,9 +29,8 @@ FAILURES = {e.name: e.failures for e in EXPERIMENTS}
 class BearingSummary(BaseModel):
     bearing: int
     channels: list[int]
-    # Documented state at the end of the run, None if the bearing survived. For display only:
-    # the detector must never see it.
-    documented_failure: str | None
+    # No documented failure: the run's end is not known as of `condition.as_of`. Only the
+    # evaluation, which is hindsight by definition, has it.
     condition: Condition
 
 
@@ -63,7 +62,6 @@ class ChannelSeries(BaseModel):
 class BearingFeatures(BaseModel):
     experiment: str
     bearing: int
-    documented_failure: str | None
     channels: list[ChannelSeries]
 
 
@@ -106,7 +104,6 @@ class NoDataYet(LookupError):
 @dataclass(frozen=True)
 class _Bearing:
     channels: list[int]
-    failure: str | None
     history: History
 
 
@@ -164,7 +161,6 @@ def _bearing_summary(bearing: int, data: _Bearing, at: datetime | None) -> Beari
     return BearingSummary(
         bearing=bearing,
         channels=data.channels,
-        documented_failure=data.failure,
         condition=condition,
     )
 
@@ -209,12 +205,8 @@ class FeatureStore:
                     _channel_series(channel, rows[rows["channel"] == channel])
                     for channel in sorted(rows["channel"].unique().tolist())
                 ]
-                failure = failures.get(bearing)
                 self._features[(experiment, bearing)] = BearingFeatures(
-                    experiment=experiment,
-                    bearing=bearing,
-                    documented_failure=failure,
-                    channels=channels,
+                    experiment=experiment, bearing=bearing, channels=channels
                 )
                 self._health[(experiment, bearing)] = _health_index(experiment, histories[bearing])
                 self._ratios[(experiment, bearing)] = _ratios(
@@ -222,7 +214,6 @@ class FeatureStore:
                 )
                 bearings[bearing] = _Bearing(
                     channels=[c.channel for c in channels],
-                    failure=failure,
                     history=histories[bearing],
                 )
             self._runs[experiment] = _Run(
@@ -257,8 +248,7 @@ class FeatureStore:
     def conditions(
         self, experiment: str, at: datetime | None = None
     ) -> dict[int, Condition] | None:
-        """Every bearing's condition as of `at`, without the documented outcome: for consumers
-        that must not see hindsight, like the copilot."""
+        """Every bearing's condition as of `at`, keyed by bearing."""
         run = self._runs.get(experiment)
         if run is None:
             return None

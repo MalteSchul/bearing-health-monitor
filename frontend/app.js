@@ -729,7 +729,7 @@ function laneTicks([low, high], threshold) {
 /** A lane's verdict at its end, with how early each level came. */
 function laneVerdict(summary) {
   const result = resultOf(summary.bearing);
-  const lines = [`<b>${capitalised(result.verdict)}</b> · ${summary.documented_failure ?? "survived"}`];
+  const lines = [`<b>${capitalised(result.verdict)}</b> · ${result.documented_failure ?? "survived"}`];
   const lead = leads(result);
   if (lead !== null) {
     lines.push(...[lead, "before the run ended"].map((line) => `<span style="color:${MUTED}">${line}</span>`));
