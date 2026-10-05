@@ -3,6 +3,8 @@ name = "bearing-health-monitor"
 version = "0.1.0"
 description = "Condition monitoring for rolling bearings: vibration features, anomaly detection and a REST API."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
