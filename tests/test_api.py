@@ -111,7 +111,7 @@ def test_version_reports_the_build_commit(tmp_path):
     assert client.get("/openapi.json").json()["info"]["version"] == "3ef6878"
 
 
-def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
+def test_experiments_list_bearings_and_their_channels(tmp_path):
     client = make_client(frontend_dir=tmp_path)
 
     experiments = {e["name"]: e for e in client.get("/api/v1/experiments").json()}
@@ -120,10 +120,7 @@ def test_experiments_list_bearings_channels_and_documented_failures(tmp_path):
     set2 = experiments["set2"]
     assert set2["snapshots"] == SNAPSHOTS
     assert set2["first"] == START.isoformat()
-    assert [(b["bearing"], b["channels"], b["documented_failure"]) for b in set2["bearings"]] == [
-        (1, [1], "outer race"),
-        (2, [2], None),
-    ]
+    assert [(b["bearing"], b["channels"]) for b in set2["bearings"]] == [(1, [1]), (2, [2])]
     assert experiments["set1"]["bearings"][0]["channels"] == [5, 6]
 
 
@@ -132,11 +129,7 @@ def test_bearings_of_an_experiment(tmp_path):
 
     [bearing] = client.get("/api/v1/experiments/set1/bearings").json()
 
-    assert (bearing["bearing"], bearing["channels"], bearing["documented_failure"]) == (
-        3,
-        [5, 6],
-        "inner race",
-    )
+    assert (bearing["bearing"], bearing["channels"]) == (3, [5, 6])
 
 
 def test_bearings_report_their_latest_condition(tmp_path):
@@ -303,11 +296,7 @@ def test_bearing_features_are_columnar_and_in_time_order(tmp_path):
 
     body = client.get("/api/v1/experiments/set2/bearings/1/features").json()
 
-    assert (body["experiment"], body["bearing"], body["documented_failure"]) == (
-        "set2",
-        1,
-        "outer race",
-    )
+    assert (body["experiment"], body["bearing"]) == ("set2", 1)
     [channel] = body["channels"]
     assert channel["channel"] == 1
     assert channel["timestamps"] == sorted(channel["timestamps"])
@@ -385,6 +374,27 @@ def test_evaluation_counts_a_documented_failure_without_an_alert_as_missed(tmp_p
 
     assert [(b["bearing"], b["verdict"]) for b in body["bearings"]] == [(3, "missed")]
     assert (body["failures"], body["failures_alerted"]) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/experiments",
+        "/api/v1/experiments/set2",
+        "/api/v1/experiments/set2/bearings",
+        "/api/v1/experiments/set2/bearings/1",
+        "/api/v1/experiments/set2/bearings/1/features",
+        "/api/v1/experiments/set2/bearings/1/health-index",
+        "/api/v1/experiments/set2/bearings/1/ratios",
+    ],
+)
+def test_only_the_evaluation_knows_the_documented_failure(tmp_path, path):
+    client = make_client(frontend_dir=tmp_path)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert "documented_failure" not in response.text
 
 
 def test_feature_series_are_gzipped_when_the_client_accepts_it(tmp_path):
