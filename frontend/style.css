@@ -175,12 +175,6 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-#as-of small {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .switch {
   display: flex;
   align-items: center;
