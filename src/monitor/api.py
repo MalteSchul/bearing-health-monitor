@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, NaiveDatetime
 
@@ -64,6 +64,17 @@ def not_found(description: str) -> dict[int | str, dict[str, Any]]:
 UNKNOWN_EXPERIMENT = "Unknown experiment"
 UNKNOWN_BEARING = "Unknown experiment or bearing"
 BEFORE_START = ", or `at` before the run's first snapshot"
+
+
+class Frontend(StaticFiles):
+    """The dashboard's files, which the browser checks with the server before each use."""
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        # Unset, the browser guesses how long a copy stays fresh and can run a new app.js on an
+        # old index.html after a deploy. no-cache still keeps copies: unchanged ones cost a 304.
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app(settings: Settings | None = None, writer: Writer | None = None) -> FastAPI:
@@ -237,6 +248,6 @@ def create_app(settings: Settings | None = None, writer: Writer | None = None) -
 
     # Mounted last so it never shadows API routes.
     if settings.frontend_dir.is_dir():
-        app.mount("/", StaticFiles(directory=settings.frontend_dir, html=True), name="frontend")
+        app.mount("/", Frontend(directory=settings.frontend_dir, html=True), name="frontend")
 
     return app
