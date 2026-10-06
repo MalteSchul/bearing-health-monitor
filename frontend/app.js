@@ -45,7 +45,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const GAP_MS = HOUR_MS / 2;
 // Only long stops are cut out of the axis: cutting short ones crowds the date labels together.
 const CUT_MS = 12 * HOUR_MS;
-const FINAL_PHASE_MS = 100 * HOUR_MS;
+const LAST_MS = 100 * HOUR_MS;
 
 const INK = "#1f1f1d";
 const MUTED = "#76756f";
@@ -73,19 +73,19 @@ const LANE_GAP_PX = 30;
 // A replay lasts about this long whatever the run's length: it skips snapshots on long runs.
 const PLAY_MS = 30_000;
 const FRAME_MS = 100;
-// The page background, translucent: what came later stays visible, but steps back.
-const VEIL = "rgba(246, 245, 241, 0.78)";
 
-// bearings: each bearing's condition at the end of the run, which the charts mark.
+// bearings: each bearing's condition at the end of the run, whose alarms the charts mark.
 // cards: each bearing's condition as of the moment shown, which the cards report.
 // machine: the rig's condition as of the moment shown, its worst bearing's.
 // health: each bearing's health-index series of the current run, which the overview draws.
+// ratios: the feature ratios of the bearing shown in detail, null for the whole rig.
 // evaluation: the run's verdicts against the documented end, hindsight whatever the moment.
 // bearing: the one shown in detail and in the copilot's focus, null for the whole rig.
 // moment: index of the snapshot shown, null for the latest.
-// range: null for the whole run, "final" for its last 100 h, or [from, to] dragged in a chart.
+// range: null for all shown, "last" for the last 100 h shown, or [from, to] dragged in a chart.
 // asked: question, run, moment and bearing of the copilot answer on show, null before the first.
-// hindsight: whether the documented outcome is shown; off, the page is what an operator saw.
+// hindsight: whether the rest of the run and its documented outcome are shown; off, the page is
+// what an operator saw at the moment shown.
 const state = {
   run: null,
   last: null,
@@ -94,6 +94,7 @@ const state = {
   cards: [],
   machine: null,
   health: {},
+  ratios: null,
   evaluation: null,
   moment: null,
   range: null,
@@ -174,8 +175,8 @@ async function selectRun(name, bearing = state.bearing, at = null) {
     getJSON(`${API}/experiments/${name}/evaluation`),
     ...experiment.bearings.map((b) => getJSON(`${API}/experiments/${name}/bearings/${b.bearing}/health-index`)),
   ]);
-  // "Final 100 h" means the same in every run; a dragged range does not.
-  if (name !== state.run && state.range !== "final") state.range = null;
+  // "Last 100 h" means the same in every run; a dragged range does not.
+  if (name !== state.run && state.range !== "last") state.range = null;
   state.run = name;
   state.last = experiment.last;
   state.bearings = experiment.bearings;
@@ -383,7 +384,7 @@ function logAxis(domain, ticks = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]) {
 
 /** The time axis of both charts: long stops cut out, the same range in each. */
 function timeAxis(cuts, anchor) {
-  const range = state.range === "final" ? finalPhase() : state.range;
+  const range = state.range === "last" ? lastRange() : state.range;
   return {
     type: "date",
     anchor,
@@ -472,25 +473,11 @@ function key(name, style) {
   return { type: "scatter", x: [null], y: [null], name, hoverinfo: "skip", ...style };
 }
 
-/**
- * The replay's moment: a line at it and a veil over what came later, which nobody knew yet. Always
- * the last two shapes of a chart, so a replay step moves them without redrawing the rest.
- */
-function replayShapes(last) {
-  const now = state.moment === null ? last : runTimes()[state.moment];
+/** With hindsight the charts go on past the moment shown, so a line marks it. */
+function momentLine() {
+  if (!state.hindsight || state.moment === null) return [];
+  const now = runTimes()[state.moment];
   return [
-    {
-      type: "rect",
-      layer: "above",
-      xref: "x",
-      yref: "paper",
-      x0: now,
-      x1: last,
-      y0: 0,
-      y1: 1,
-      fillcolor: VEIL,
-      line: { width: 0 },
-    },
     {
       type: "line",
       layer: "above",
@@ -500,7 +487,6 @@ function replayShapes(last) {
       x1: now,
       y0: 0,
       y1: 1,
-      visible: state.moment !== null,
       line: { color: INK, width: 1.5 },
     },
   ];
@@ -547,8 +533,16 @@ function note(text, x, y, extra = {}) {
   };
 }
 
-function finalPhase() {
-  return [isoAt(millis(state.last) - FINAL_PHASE_MS), state.last];
+/** How many of the run's snapshots the charts show: up to the moment, all of them with hindsight. */
+function shownCount() {
+  const times = runTimes();
+  return state.hindsight || state.moment === null ? times.length : state.moment + 1;
+}
+
+/** The last 100 h the charts show: before the moment, or before the run's end with hindsight. */
+function lastRange() {
+  const end = runTimes()[shownCount() - 1];
+  return [isoAt(millis(end) - LAST_MS), end];
 }
 
 /** When the bearing was raised to alert and to danger, as one mark if both came at once. */
@@ -564,7 +558,10 @@ function escalations(condition) {
   return marks;
 }
 
-/** One bearing over the run: its health index, and below it the features it is the largest of. */
+/**
+ * One bearing up to the last snapshot given: its health index and the alarms raised by then, and
+ * below them the features it is the largest of.
+ */
 function drawChart(health, ratios, condition) {
   const names = Object.keys(FEATURES);
   const { x, ys } = breakAtGaps(health.timestamps, [
@@ -574,7 +571,8 @@ function drawChart(health, ratios, condition) {
   ]);
   const [index, driver, ...features] = ys;
   const cuts = longStops(health.timestamps);
-  const marks = escalations(condition);
+  // Alarms latch, so the ones raised by the last snapshot are exactly those known then.
+  const marks = escalations(condition).filter((mark) => mark.at <= health.timestamps.at(-1));
 
   const traces = [
     {
@@ -623,7 +621,7 @@ function drawChart(health, ratios, condition) {
       ...momentShapes(stopMoments(cuts), axis),
     );
   });
-  shapes.push(...replayShapes(health.timestamps.at(-1)));
+  shapes.push(...momentLine());
 
   // Short titles; the rule behind each panel shows on hovering the ⓘ.
   const title = (text, y, explanation) =>
@@ -737,8 +735,9 @@ function laneVerdict(summary) {
   return lines.join("<br>");
 }
 
-function drawOverview() {
-  const lanes = state.bearings.map((summary) => ({ summary, health: state.health[summary.bearing] }));
+/** Every bearing's health index up to the last snapshot given, one lane each. */
+function drawOverview(series) {
+  const lanes = state.bearings.map((summary) => ({ summary, health: series[summary.bearing] }));
   const { timestamps, threshold } = lanes[0].health;
   const cuts = longStops(timestamps);
   const domains = laneDomains(lanes.length);
@@ -806,7 +805,7 @@ function drawOverview() {
       );
     }
   });
-  shapes.push(...replayShapes(timestamps.at(-1)));
+  shapes.push(...momentLine());
   annotations.push(...stopMarks(cuts));
 
   const layout = {
@@ -894,7 +893,7 @@ function watchLaneClicks() {
 
 function markRange() {
   $("zoom-all").setAttribute("aria-pressed", String(state.range === null));
-  $("zoom-final").setAttribute("aria-pressed", String(state.range === "final"));
+  $("zoom-last").setAttribute("aria-pressed", String(state.range === "last"));
 }
 
 const CHARTS = ["overview-chart", "chart"];
@@ -903,7 +902,7 @@ let following = false;
 
 /** Shows the current range in every drawn chart but the one it came from. */
 async function applyRange(source = null) {
-  const range = state.range === "final" ? finalPhase() : state.range;
+  const range = state.range === "last" ? lastRange() : state.range;
   const update = range ? { "xaxis.range": range } : { "xaxis.autorange": true };
   following = true;
   try {
@@ -951,39 +950,13 @@ let momentRequest = null;
 /** What the bar says about the moment shown. */
 function markMoment() {
   const times = runTimes();
-  const latest = state.moment === null;
   const at = formatTime(times[state.moment ?? times.length - 1]);
-  const label = `${latest ? "Latest" : "As of"} ${at}`;
-  if (latest) {
-    $("as-of").replaceChildren(label);
-  } else {
-    // Only while replaying: the veil over what came later needs saying.
-    const note = document.createElement("small");
-    note.textContent = "dimmed: not known yet then";
-    $("as-of").replaceChildren(label, note);
-  }
+  $("as-of").textContent = `${state.moment === null ? "Latest" : "As of"} ${at}`;
 }
 
 function markPlay() {
   $("play").textContent = playing ? "❚❚ Pause" : "▶ Replay";
   $("play").setAttribute("aria-label", playing ? "Pause the replay" : "Replay the run");
-}
-
-/** Moves the line and the veil in every drawn chart; nothing else is redrawn. */
-function moveVeil() {
-  const [veil, line] = replayShapes(runTimes().at(-1));
-  const drawn = CHARTS.filter((id) => $(id).data);
-  return Promise.all(
-    drawn.map((id) => {
-      const k = $(id).layout.shapes.length - 2;
-      return Plotly.relayout(id, {
-        [`shapes[${k}].x0`]: veil.x0,
-        [`shapes[${k + 1}].x0`]: line.x0,
-        [`shapes[${k + 1}].x1`]: line.x1,
-        [`shapes[${k + 1}].visible`]: line.visible,
-      });
-    }),
-  );
 }
 
 /** The rig's one light: its worst status, and for an alert or danger which bearings have it. */
@@ -1020,7 +993,7 @@ async function showMoment(index) {
   markMoment();
   markReply();
   remember();
-  await Promise.all([moveVeil(), loadMoment()]);
+  await Promise.all([drawCharts(), loadMoment()]);
 }
 
 /** Steps through the run from where the slider is, or from its start when at the end. */
@@ -1062,10 +1035,30 @@ function listen(id, handlers) {
   }
 }
 
+/**
+ * Both charts as of the moment shown. Without hindsight the series are cut there, so nothing that
+ * came later reaches a chart, not even its axis ranges; with it they run to the end.
+ */
+function drawCharts() {
+  const count = shownCount();
+  const cut = (series) =>
+    Object.fromEntries(
+      Object.entries(series).map(([key, value]) => [key, Array.isArray(value) ? value.slice(0, count) : value]),
+    );
+  const health = Object.fromEntries(Object.entries(state.health).map(([bearing, series]) => [bearing, cut(series)]));
+  const charts = [drawOverview(health)];
+  if (state.bearing !== null) {
+    const summary = state.bearings.find((b) => b.bearing === state.bearing);
+    charts.push(drawChart(health[state.bearing], cut(state.ratios), summary.condition));
+  }
+  return Promise.all(charts);
+}
+
 /** Shows one bearing in detail, or with null the whole rig. The selection is the copilot's focus. */
 async function selectBearing(bearing) {
   const ratios = bearing === null ? null : await getJSON(`${API}/experiments/${state.run}/bearings/${bearing}/ratios`);
   state.bearing = bearing;
+  state.ratios = ratios;
   remember();
   renderCards();
   markRange();
@@ -1076,13 +1069,12 @@ async function selectBearing(bearing) {
   $("overview").hidden = false;
   $("detail").hidden = bearing === null;
   if (bearing === null) {
-    // Gone rather than hidden, so the replay and the time range leave it alone.
+    // Gone rather than hidden, so the time range leaves it alone.
     Plotly.purge("chart");
-    await drawOverview();
+    await drawCharts();
   } else {
     $("detail-title").textContent = `Bearing ${bearing}`;
-    const summary = state.bearings.find((b) => b.bearing === bearing);
-    await Promise.all([drawOverview(), drawChart(state.health[bearing], ratios, summary.condition)]);
+    await drawCharts();
     listen("chart", {
       plotly_relayout: followDrag("chart"),
       plotly_legendclick: featuresOnly,
@@ -1267,7 +1259,7 @@ function markReply() {
 
 async function start() {
   $("zoom-all").addEventListener("click", () => showRange(null));
-  $("zoom-final").addEventListener("click", () => showRange("final"));
+  $("zoom-last").addEventListener("click", () => showRange("last"));
   $("play").addEventListener("click", handle(play, false));
   $("ask").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1279,7 +1271,7 @@ async function start() {
     handle(async () => {
       showHindsight($("hindsight").checked);
       remember();
-      await drawOverview();
+      await drawCharts();
     }, false),
   );
   // Dragging the slider takes over from a running replay.
