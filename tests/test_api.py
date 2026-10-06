@@ -73,6 +73,22 @@ def test_frontend_is_served_from_configured_directory(tmp_path):
     assert "custom frontend" in response.text
 
 
+def test_browsers_revalidate_frontend_files_before_each_use(tmp_path):
+    (tmp_path / "index.html").write_text("<p>frontend</p>")
+    (tmp_path / "app.js").write_text("start();")
+    client = make_client(frontend_dir=tmp_path)
+
+    page = client.get("/")
+    script = client.get("/app.js")
+    unchanged = client.get("/app.js", headers={"If-None-Match": script.headers["etag"]})
+
+    assert page.headers["cache-control"] == "no-cache"
+    assert script.headers["cache-control"] == "no-cache"
+    # Revalidating an unchanged file costs no download.
+    assert unchanged.status_code == 304
+    assert unchanged.headers["cache-control"] == "no-cache"
+
+
 def test_static_frontend_does_not_shadow_api(tmp_path):
     (tmp_path / "index.html").write_text("<p>frontend</p>")
     client = make_client(frontend_dir=tmp_path)
