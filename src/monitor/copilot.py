@@ -13,12 +13,12 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from itertools import pairwise
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 import anthropic
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, StringConstraints, ValidationError, field_validator
 
-from monitor.health import HOLD, MAX_GAP, Condition, machine_condition
+from monitor.health import HOLD, MAX_GAP, Condition, MachineCondition, machine_condition
 from monitor.knowledge import Knowledge
 from monitor.store import FeatureStore, HealthIndex
 
@@ -35,15 +35,23 @@ SYSTEM = """\
 You are the copilot of a vibration monitor for rolling bearings. A service technician asks about \
 one test rig at one moment.
 
-Answer only from the numbered facts in the message. After each sentence, cite the facts it rests \
-on, like [2] or [1][4]. The detector's status is the verdict: explain it, never overrule it. A \
-general fact that starts with "For bearing ..." applies to each bearing it names. Quote numbers \
-exactly as the facts give them and never estimate new ones, such as a remaining life. If the facts \
-do not answer the question, say so in one sentence and name what is missing.
+Answer only from the numbered facts in the message. End every sentence, the lead included, with \
+the facts it rests on, like [2] or [1][4]. The detector's status is the verdict: explain it, never \
+overrule it. The dashboard shows that status next to your answer, so never restate it in other \
+words. A general fact that starts with "For bearing ..." applies to each bearing it names. The \
+causes the facts list for a fault are possibilities: never present one as found. Quote numbers \
+exactly as the facts give them and never estimate new ones, such as a remaining life.
 
-Answer the question in the first sentence, then add only what the technician needs to act on it. \
-Answer in the language of the question, as short as the question allows and in at most 80 words \
-of plain text, without headings or lists."""
+Write the answer in three fields, as plain text without markup:
+- lead: one sentence of at most 20 words that answers the question as asked. If the facts do not \
+answer it, say so and name what is missing.
+- points: the reasons the lead rests on that the technician cannot read off the dashboard, one \
+sentence of at most 15 words each. Most answers need one or two, none if the lead stands on its \
+own, never more than 3.
+- action: the next step in one sentence of at most 20 words, only if the question asks what to do \
+or the answer leads to a step the facts name, taken from those facts. Otherwise null.
+
+Write every field in the language of the question."""
 
 
 class Question(BaseModel):
@@ -59,8 +67,50 @@ class Source(BaseModel):
     ref: str
 
 
+Stripped = Annotated[str, StringConstraints(strip_whitespace=True)]
+
+
+class Answer(BaseModel):
+    """What the copilot writes. Only what would break the page is rejected: a missing lead. How
+    many points and when an action fits are the prompt's job, since such an answer still reads."""
+
+    lead: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    points: list[Stripped]
+    action: Stripped | None
+
+    @field_validator("points")
+    @classmethod
+    def _drop_blank_points(cls, points: list[str]) -> list[str]:
+        return [point for point in points if point]
+
+    # The schema allows "" as well as null; both mean there is no next step.
+    @field_validator("action")
+    @classmethod
+    def _blank_action_is_none(cls, action: str | None) -> str | None:
+        return action or None
+
+
+# Sent with every question: the API then only lets the model write JSON of this shape. It takes
+# no length limits, so those stay in the prompt; a test keeps it in step with Answer.
+ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "lead": {"type": "string"},
+        "points": {"type": "array", "items": {"type": "string"}},
+        "action": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    },
+    "required": ["lead", "points", "action"],
+    "additionalProperties": False,
+}
+
+
 class CopilotAnswer(BaseModel):
-    answer: str | None
+    # The verdict, from the same conditions as the facts: shown next to the answer, never written
+    # by the model, so the answer cannot put another status in front of the technician.
+    machine: MachineCondition
+    # The bearing in focus; None for the whole rig.
+    condition: Condition | None
+    answer: Answer | None
     # Why there is no answer, e.g. no API key. The sources are returned either way.
     note: str | None = None
     sources: list[Source]
@@ -79,7 +129,18 @@ class RateLimited(Exception):
 
 
 class Writer(Protocol):
-    def __call__(self, system: str, prompt: str) -> str: ...
+    """Returns JSON text of the given schema."""
+
+    def __call__(self, system: str, prompt: str, schema: dict[str, Any]) -> str: ...
+
+
+def read_answer(text: str) -> Answer:
+    # Models bold their key sentence out of habit, even when asked for plain text, and the
+    # dashboard shows text as it is. Two asterisks mean nothing in JSON or prose: nothing is lost.
+    try:
+        return Answer.model_validate_json(text.replace("**", ""))
+    except ValidationError as exc:
+        raise Unavailable("The copilot's answer could not be read.") from exc
 
 
 class ClaudeWriter:
@@ -91,7 +152,7 @@ class ClaudeWriter:
         self._client = anthropic.Anthropic(api_key=api_key, timeout=45.0, max_retries=1)
         self._model = model
 
-    def __call__(self, system: str, prompt: str) -> str:
+    def __call__(self, system: str, prompt: str, schema: dict[str, Any]) -> str:
         try:
             response = self._client.beta.messages.create(
                 model=self._model,
@@ -99,8 +160,12 @@ class ClaudeWriter:
                 max_tokens=4000,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
-                # Phrasing given facts needs little reasoning; low keeps it quick and cheap.
-                output_config={"effort": "low"},
+                # Phrasing given facts needs little reasoning; low keeps it quick and cheap. A new
+                # schema is prepared once, so the first question after a change takes longer.
+                output_config={
+                    "effort": "low",
+                    "format": {"type": "json_schema", "schema": schema},
+                },
                 # A declined request is retried server-side on the model suited to its category.
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
@@ -343,16 +408,20 @@ class Copilot:
         if question.bearing is not None and question.bearing not in conditions:
             raise UnknownBearing(f"No bearing {question.bearing} in experiment {experiment!r}")
         sources = self.sources(experiment, conditions, question.bearing)
+        reply = CopilotAnswer(
+            machine=machine_condition(dict(conditions)),
+            condition=None if question.bearing is None else conditions[question.bearing],
+            answer=None,
+            sources=sources,
+        )
         if self._writer is None:
-            return CopilotAnswer(answer=None, note=NO_KEY, sources=sources)
+            return reply.model_copy(update={"note": NO_KEY})
         if not self._limit.allow():
             raise RateLimited
         moment = max(c.as_of for c in conditions.values())
         message = prompt(question.question, question.bearing, moment, sources)
         try:
-            answer = self._writer(SYSTEM, message)
+            answer = read_answer(self._writer(SYSTEM, message, ANSWER_SCHEMA))
         except Unavailable as exc:
-            return CopilotAnswer(answer=None, note=str(exc), sources=sources)
-        # Models bold their key sentence out of habit, even when asked for plain text, and the
-        # dashboard shows text as it is. Two asterisks mean nothing in prose, so nothing is lost.
-        return CopilotAnswer(answer=answer.replace("**", ""), sources=sources)
+            return reply.model_copy(update={"note": str(exc)})
+        return reply.model_copy(update={"answer": answer})

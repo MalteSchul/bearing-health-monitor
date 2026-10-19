@@ -1,5 +1,6 @@
 from dataclasses import fields
 from datetime import datetime, timedelta
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -440,11 +441,14 @@ COPILOT = "/api/v1/experiments/set2/copilot"
 class FakeWriter:
     """Stands in for the model: records what it was sent and answers with a fixed text."""
 
-    def __init__(self, answer: str = "Bearing 1 is in alert [1].") -> None:
+    def __init__(
+        self,
+        answer: str = '{"lead": "Bearing 1 is in alert [1].", "points": [], "action": null}',
+    ) -> None:
         self.answer = answer
         self.prompts: list[str] = []
 
-    def __call__(self, system: str, prompt: str) -> str:
+    def __call__(self, system: str, prompt: str, schema: dict[str, Any]) -> str:
         self.prompts.append(prompt)
         return self.answer
 
@@ -461,6 +465,8 @@ def test_copilot_without_a_key_returns_the_facts_but_no_answer(tmp_path):
 
     assert body["answer"] is None
     assert "No API key" in body["note"]
+    assert body["machine"] == {"status": "alert", "bearings": [1]}
+    assert body["condition"]["status"] == "alert"
     rig, first = body["sources"][:2]
     assert (rig["id"], rig["kind"], rig["text"]) == (1, "detector", "Rig: alert, from bearing 1.")
     assert first["text"].startswith(f"Bearing 1: alert since {ALERT_AT:%Y-%m-%d %H:%M}")
@@ -485,20 +491,20 @@ def test_copilot_sends_the_facts_and_the_tagged_question_to_the_writer(tmp_path)
 
     body = client.post(COPILOT, json={"question": "What should I do?", "bearing": 1}).json()
 
-    assert body["answer"] == "Bearing 1 is in alert [1]."
+    assert body["answer"] == {"lead": "Bearing 1 is in alert [1].", "points": [], "action": None}
     [sent] = writer.prompts
     assert "The technician is looking at bearing 1." in sent
     assert f"[1] {body['sources'][0]['text']}" in sent
     assert sent.endswith("<question>What should I do?</question>")
 
 
-def test_copilot_answers_in_plain_text_when_the_model_writes_bold(tmp_path):
-    writer = FakeWriter("**Bearing 1 is in alert.** [1] Plan the replacement [2].")
-    client = copilot_client(tmp_path, writer=writer)
+def test_copilot_returns_the_facts_when_the_answer_cannot_be_read(tmp_path):
+    client = copilot_client(tmp_path, writer=FakeWriter("Bearing 1 is in alert [1]."))
 
     body = client.post(COPILOT, json={"question": "What should I do?", "bearing": 1}).json()
 
-    assert body["answer"] == "Bearing 1 is in alert. [1] Plan the replacement [2]."
+    assert (body["answer"], body["note"]) == (None, "The copilot's answer could not be read.")
+    assert body["sources"]
 
 
 def test_copilot_answers_about_the_whole_run_without_a_bearing(tmp_path):
@@ -506,6 +512,8 @@ def test_copilot_answers_about_the_whole_run_without_a_bearing(tmp_path):
 
     body = client.post(COPILOT, json={"question": "Which bearing is the problem?"}).json()
 
+    assert body["condition"] is None
+    assert body["machine"]["status"] == "alert"
     detector = [s["text"] for s in body["sources"] if s["kind"] == "detector"]
     # The rig, then each bearing's status and its trend.
     assert [t.split(":")[0] for t in detector[:4]] == [
@@ -532,12 +540,13 @@ def test_copilot_only_knows_what_was_known_at_that_time(tmp_path):
 
     assert body["sources"][1]["text"].startswith("Bearing 1: ok;")
     assert body["sources"][1]["ref"] == f"Detector, as of {FAULT_FROM:%Y-%m-%d} 12:30"
+    assert (body["machine"]["status"], body["condition"]["status"]) == ("ok", "ok")
 
 
 def test_copilot_reports_why_the_writer_gave_no_answer(tmp_path):
     reason = "The copilot's language model could not be reached."
 
-    def unavailable(system: str, prompt: str) -> str:
+    def unavailable(system: str, prompt: str, schema: dict[str, Any]) -> str:
         raise Unavailable(reason)
 
     client = copilot_client(tmp_path, writer=unavailable)

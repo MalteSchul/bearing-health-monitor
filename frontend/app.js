@@ -277,17 +277,34 @@ function setMarkup(element, html) {
   written.set(element, html);
 }
 
+/** A bearing's status as a pill: coloured for an alarm, said in grey otherwise. */
+function fillBearingPill(pill, condition) {
+  pill.style.setProperty("--status", STATUS[condition.status].colour);
+  pill.classList.toggle("calm", !(condition.status in ACTIONS));
+  pill.textContent = STATUS[condition.status].label;
+}
+
+/** The rig's status as a pill: its worst status, and for an alert or danger which bearings have it. */
+function fillMachinePill(pill, { status, bearings }) {
+  const named = status === "alert" || status === "danger";
+  const which = named ? ` · bearing${bearings.length > 1 ? "s" : ""} ${listed(bearings)}` : "";
+  pill.style.setProperty("--status", STATUS[status].colour);
+  pill.classList.toggle("calm", !named);
+  pill.textContent = `${STATUS[status].label}${which}`;
+}
+
+function formatIndex(index) {
+  return index === null ? "–" : `${index.toFixed(1)}×`;
+}
+
 function fillCard(card, summary) {
   const { condition } = summary;
-  const status = STATUS[condition.status];
   const part = (name) => card.querySelector(`.${name}`);
-  const alarm = condition.status in ACTIONS;
-  card.style.setProperty("--status", status.colour);
-  card.classList.toggle("alarm", alarm);
+  card.style.setProperty("--status", STATUS[condition.status].colour);
+  card.classList.toggle("alarm", condition.status in ACTIONS);
   card.setAttribute("aria-pressed", String(summary.bearing === state.bearing));
-  part("pill").textContent = status.label;
-  part("pill").classList.toggle("calm", !alarm);
-  part("value").textContent = condition.index === null ? "–" : `${condition.index.toFixed(1)}×`;
+  fillBearingPill(part("pill"), condition);
+  part("value").textContent = formatIndex(condition.index);
   setMarkup(part("facts"), cardLine(condition));
 }
 
@@ -959,15 +976,9 @@ function markPlay() {
   $("play").setAttribute("aria-label", playing ? "Pause the replay" : "Replay the run");
 }
 
-/** The rig's one light: its worst status, and for an alert or danger which bearings have it. */
+/** The rig's one light. */
 function renderMachine() {
-  const { status, bearings } = state.machine;
-  const named = status === "alert" || status === "danger";
-  const which = named ? ` · bearing${bearings.length > 1 ? "s" : ""} ${listed(bearings)}` : "";
-  const pill = $("machine").querySelector(".pill");
-  pill.style.setProperty("--status", STATUS[status].colour);
-  pill.classList.toggle("calm", !named);
-  pill.textContent = `${STATUS[status].label}${which}`;
+  fillMachinePill($("machine").querySelector(".pill"), state.machine);
 }
 
 /** The cards and the rig's light as of the moment shown, through the same `?at=` any client uses. */
@@ -1213,13 +1224,52 @@ function factItem(source) {
 }
 
 /**
- * The answer first, its facts folded away: the cited ones and every other one looked up. Without an
- * answer the facts are all there is, so they open.
+ * The detector's verdict at the moment asked about, drawn as on the card or the rig light: it comes
+ * with the answer, so it stays that moment's even when the dashboard moves on.
+ */
+function renderVerdict({ machine, condition }, bearing) {
+  const part = (name) => $("verdict").querySelector(`.${name}`);
+  if (condition === null) {
+    part("verdict-subject").textContent = "Rig";
+    fillMachinePill(part("pill"), machine);
+    part("verdict-index").textContent = "";
+    part("verdict-line").replaceChildren();
+    return;
+  }
+  part("verdict-subject").textContent = `Bearing ${bearing}`;
+  fillBearingPill(part("pill"), condition);
+  part("verdict-index").textContent = `health index ${formatIndex(condition.index)}`;
+  // The card's own line, built from the detector's data, never from the model's text.
+  part("verdict-line").innerHTML = cardLine(condition);
+}
+
+/** The copilot's lead, its points if any, and the next step if there is one. */
+function renderAnswer(answer, facts) {
+  $("answer").hidden = answer === null;
+  if (answer === null) return;
+  $("lead").replaceChildren(...answerParts(answer.lead, facts));
+  $("points").replaceChildren(
+    ...answer.points.map((point) => {
+      const item = document.createElement("li");
+      item.append(...answerParts(point, facts));
+      return item;
+    }),
+  );
+  $("next-step").hidden = answer.action === null;
+  $("next-step")
+    .querySelector("span")
+    .replaceChildren(...(answer.action === null ? [] : answerParts(answer.action, facts)));
+}
+
+/**
+ * The verdict and the answer first, its facts folded away: the cited ones and every other one looked
+ * up. Without an answer the facts are all there is, so they open.
  */
 function renderReply(reply) {
   const facts = new Map(reply.sources.map((source) => [source.id, source]));
+  const { lead, points, action } = reply.answer ?? { lead: "", points: [], action: null };
   const cited = new Set(
-    [...(reply.answer ?? "").matchAll(new RegExp(CITATION, "g"))]
+    [...[lead, ...points, action ?? ""].join(" ").matchAll(new RegExp(CITATION, "g"))]
       .map((match) => Number(match[1]))
       .filter((id) => facts.has(id)),
   );
@@ -1229,8 +1279,8 @@ function renderReply(reply) {
   const end = moment === null ? " (latest)" : "";
   const scope = bearing === null ? "whole rig" : `bearing ${bearing} in focus`;
   $("reply-label").replaceChildren(asked, ` · ${runLabel(run)} as of ${formatTime(time)}${end} · ${scope}`);
-  $("answer").hidden = reply.answer === null;
-  $("answer").replaceChildren(...(reply.answer === null ? [] : answerParts(reply.answer, facts)));
+  renderVerdict(reply, bearing);
+  renderAnswer(reply.answer, facts);
   $("answer-note").textContent = reply.note ?? "";
   const citedFold = $("cited-facts");
   citedFold.hidden = cited.size === 0;

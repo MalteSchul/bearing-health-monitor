@@ -6,6 +6,8 @@ import httpx2
 import pytest
 
 from monitor.copilot import (
+    ANSWER_SCHEMA,
+    Answer,
     ClaudeWriter,
     RateLimit,
     Source,
@@ -14,6 +16,7 @@ from monitor.copilot import (
     lookup_starts,
     prompt,
     reached_by,
+    read_answer,
     rig_fact,
     trend_fact,
 )
@@ -270,18 +273,21 @@ def reply(stop_reason: str, *blocks: SimpleNamespace) -> SimpleNamespace:
     return SimpleNamespace(stop_reason=stop_reason, content=list(blocks))
 
 
-def test_writer_returns_only_the_text_and_asks_for_low_effort_with_fallback():
+def test_writer_returns_only_the_text_and_asks_for_the_schema_at_low_effort_with_fallback():
     writer, messages = writer_with(
         reply(
             "end_turn",
             SimpleNamespace(type="thinking", thinking=""),
-            SimpleNamespace(type="text", text="Bearing 3 is red [1]."),
+            SimpleNamespace(type="text", text='{"lead": "Bearing 3 is red [1]."}'),
         )
     )
 
-    assert writer("system", "prompt") == "Bearing 3 is red [1]."
+    assert writer("system", "prompt", ANSWER_SCHEMA) == '{"lead": "Bearing 3 is red [1]."}'
     assert messages.kwargs["model"] == "claude-opus-5-5"
-    assert messages.kwargs["output_config"] == {"effort": "low"}
+    assert messages.kwargs["output_config"] == {
+        "effort": "low",
+        "format": {"type": "json_schema", "schema": ANSWER_SCHEMA},
+    }
     assert messages.kwargs["fallbacks"] == "default"
 
 
@@ -297,7 +303,7 @@ def test_writer_turns_unusable_replies_into_a_reason(result, reason):
     writer, _ = writer_with(result)
 
     with pytest.raises(Unavailable, match=reason):
-        writer("system", "prompt")
+        writer("system", "prompt", ANSWER_SCHEMA)
 
 
 REQUEST = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -325,4 +331,57 @@ def test_writer_turns_api_errors_into_a_reason(error, reason):
     writer, _ = writer_with(error)
 
     with pytest.raises(Unavailable, match=reason):
-        writer("system", "prompt")
+        writer("system", "prompt", ANSWER_SCHEMA)
+
+
+def test_schema_asks_for_exactly_the_fields_of_an_answer():
+    assert set(ANSWER_SCHEMA["properties"]) == set(ANSWER_SCHEMA["required"])
+    assert set(ANSWER_SCHEMA["properties"]) == set(Answer.model_fields)
+
+
+@pytest.mark.parametrize(
+    ("text", "answer"),
+    [
+        (
+            '{"lead": "No [1].", "points": ["It hears bearing 1 [2]."], "action": "Act [3]."}',
+            Answer(lead="No [1].", points=["It hears bearing 1 [2]."], action="Act [3]."),
+        ),
+        (
+            '{"lead": "2.3x [4].", "points": [], "action": null}',
+            Answer(lead="2.3x [4].", points=[], action=None),
+        ),
+        (
+            '{"lead": " 2.3x [4]. ", "points": [" ", ""], "action": " "}',
+            Answer(lead="2.3x [4].", points=[], action=None),
+        ),
+        (
+            '{"lead": "**No.** [1]", "points": [], "action": "**Stop** [3]."}',
+            Answer(lead="No. [1]", points=[], action="Stop [3]."),
+        ),
+    ],
+    ids=["all fields", "lead only", "blanks mean none", "bold removed"],
+)
+def test_answer_is_read_from_the_models_json(text, answer):
+    assert read_answer(text) == answer
+
+
+def test_more_points_than_asked_for_still_make_an_answer():
+    points = [f"Point {n} [{n}]." for n in range(1, 6)]
+    text = Answer(lead="No [1].", points=points, action=None).model_dump_json()
+
+    assert read_answer(text).points == points
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Bearing 3 is red [1].",
+        '{"lead": "No [1].", "points": []',
+        '{"lead": "  ", "points": [], "action": null}',
+        '{"points": ["It hears bearing 1 [2]."], "action": null}',
+    ],
+    ids=["prose", "cut off", "blank lead", "no lead"],
+)
+def test_text_without_a_lead_in_the_schema_cannot_be_read(text):
+    with pytest.raises(Unavailable, match="could not be read"):
+        read_answer(text)
