@@ -18,7 +18,7 @@ from typing import Annotated, Literal, Protocol
 import anthropic
 from pydantic import BaseModel, StringConstraints
 
-from monitor.health import HOLD, MAX_GAP, Condition, machine_condition
+from monitor.health import HOLD, MAX_GAP, Condition, MachineCondition, machine_condition
 from monitor.knowledge import Knowledge
 from monitor.store import FeatureStore, HealthIndex
 
@@ -60,6 +60,11 @@ class Source(BaseModel):
 
 
 class CopilotAnswer(BaseModel):
+    # The verdict, from the same conditions as the facts: shown next to the answer, never written
+    # by the model, so the answer cannot put another status in front of the technician.
+    machine: MachineCondition
+    # The bearing in focus; None for the whole rig.
+    condition: Condition | None
     answer: str | None
     # Why there is no answer, e.g. no API key. The sources are returned either way.
     note: str | None = None
@@ -343,8 +348,14 @@ class Copilot:
         if question.bearing is not None and question.bearing not in conditions:
             raise UnknownBearing(f"No bearing {question.bearing} in experiment {experiment!r}")
         sources = self.sources(experiment, conditions, question.bearing)
+        reply = CopilotAnswer(
+            machine=machine_condition(dict(conditions)),
+            condition=None if question.bearing is None else conditions[question.bearing],
+            answer=None,
+            sources=sources,
+        )
         if self._writer is None:
-            return CopilotAnswer(answer=None, note=NO_KEY, sources=sources)
+            return reply.model_copy(update={"note": NO_KEY})
         if not self._limit.allow():
             raise RateLimited
         moment = max(c.as_of for c in conditions.values())
@@ -352,7 +363,7 @@ class Copilot:
         try:
             answer = self._writer(SYSTEM, message)
         except Unavailable as exc:
-            return CopilotAnswer(answer=None, note=str(exc), sources=sources)
+            return reply.model_copy(update={"note": str(exc)})
         # Models bold their key sentence out of habit, even when asked for plain text, and the
         # dashboard shows text as it is. Two asterisks mean nothing in prose, so nothing is lost.
-        return CopilotAnswer(answer=answer.replace("**", ""), sources=sources)
+        return reply.model_copy(update={"answer": answer.replace("**", "")})
