@@ -54,7 +54,18 @@
       <div id="reply" hidden>
         <p id="reply-label"></p>
         <p id="stale-note" hidden>The dashboard now shows another moment than this answer: ask again for it.</p>
-        <p id="answer"></p>
+        <p id="verdict">
+          <span class="verdict-source">Detector</span>
+          <strong class="verdict-subject"></strong>
+          <span class="pill"></span>
+          <span class="verdict-index"></span>
+          <span class="verdict-line"></span>
+        </p>
+        <div id="answer">
+          <p id="lead"></p>
+          <ul id="points"></ul>
+          <p id="next-step"><strong>Next step</strong> <span></span></p>
+        </div>
         <p id="answer-note"></p>
         <details id="cited-facts" class="facts">
           <summary></summary>
