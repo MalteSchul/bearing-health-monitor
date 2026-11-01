@@ -93,3 +93,7 @@ just evaluate  # detector results per bearing and vs. rms alone (tuned on set 2,
 ```
 
 Unpacking needs bsdtar (built into Windows and macOS; `apt install libarchive-tools` on Linux).
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md): free for noncommercial use; commercial use needs my permission.
